@@ -33,7 +33,21 @@ if "token" not in st.session_state:
 
     st.session_state.token='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'
 
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="Injaz OCR System",
+    page_icon="https://bunny-wp-pullzone-x8psmhth4d.b-cdn.net/wp-content/uploads/2022/12/Asset-1.svg",
+    layout="wide"
+)
+
+st.markdown("""
+  <style>
+    /* force background and panels white/lemon */
+    .css-1lcbmhc, .css-12w0qpk {background-color: #FFFACD !important;}
+    .css-1v3fvcr {background-color: #FFFFFF !important;}
+    /* force text black */
+    .css-1v4dx5s {color: #000000 !important;}
+  </style>
+""", unsafe_allow_html=True)
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
 
 # ---------- SIDE_PROMPT (others are imported externally) ----------
@@ -720,6 +734,31 @@ def process_document(file_data, filename):
 
 # ---------- STREAMLIT UI ----------
 # ---------- STREAMLIT UI ----------
+st.markdown("""
+    <style>
+      .navbar {
+        background-color: #ffffff;
+        padding: 0.5rem 1rem;
+        display: flex;
+        align-items: center;
+        border-bottom: 1px solid #e0e0e0;
+      }
+      .navbar img {
+        height: 40px;
+      }
+      .navbar .title {
+        flex: 1;
+        text-align: center;
+        font-size: 1.5rem;
+        font-weight: bold;
+        margin-right: 40px;  /* to offset the logo width */
+      }
+    </style>
+    <div class="navbar">
+      <img src="https://bunny-wp-pullzone-x8psmhth4d.b-cdn.net/wp-content/uploads/2022/12/Asset-1.svg" alt="Logo">
+      <div class="title">Injaz OCR System</div>
+    </div>
+""", unsafe_allow_html=True)
 st.title("INJAZ OCR SYSTEM")
 st.markdown("Upload image(s) or PDF(s) for OCR, classification, extraction, and saving as PDFs.")
 
