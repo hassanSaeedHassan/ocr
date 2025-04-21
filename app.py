@@ -18,6 +18,7 @@ from scripts.ui_functions import *
 from scripts.unification import *
 from scripts.vlm_utils import create_pdf_from_pages
 from scripts.procedure_recognition import suggest_procedure
+import streamlit.components.v1 as components
 
 # ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
 if "client" not in st.session_state:
@@ -238,19 +239,27 @@ def render_data_form(extracted_data, form_key):
     if not isinstance(extracted_data, dict):
         extracted_data = {"raw_text": str(extracted_data)}
 
-    # 5) Render the form
     with st.form(key=f"ocr_data_form_{form_key}"):
-        st.header("Editable Extracted Data")
+
+        # use the form_key to namespace widget keys
         form_inputs = render_dict(
             extracted_data,
             indent_level=0,
-            parent_key="",
+            parent_key=f"form{form_key}",
             use_expander=False,
         )
-        if st.form_submit_button("Save Changes"):
-            st.success("Form submitted!")
-            return form_inputs
 
+        # When they click “Save Changes”:
+        submitted = st.form_submit_button("Save Changes")
+        if submitted:
+            # 1) Write back into session_state
+            st.session_state.results[form_key]["extracted_data"] = form_inputs
+            # 2) Give immediate feedback
+            st.success("Changes saved!")
+            # 3) Rerun so the new values are re‑rendered
+            st.experimental_rerun()
+
+    # returning here is optional—once we rerun the app, you’ll see the updated form
     return None
 
 
@@ -759,7 +768,7 @@ st.markdown("""
       <div class="title">Injaz OCR System</div>
     </div>
 """, unsafe_allow_html=True)
-st.title("INJAZ OCR SYSTEM")
+
 st.markdown("Upload image(s) or PDF(s) for OCR, classification, extraction, and saving as PDFs.")
 
 uploaded_files = st.file_uploader("Upload files", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
@@ -906,91 +915,94 @@ if "results" in st.session_state and st.session_state.results:
 
 
     with col_pdf:
-        doc_label = current.get("doc_type", "document")
-        st.write(f"{current['filename']} classified as: {doc_label}")
+        filename = current.get("filename", "document")
+        doc_type = current.get("doc_type", "document")
+        st.write(f"{filename} classified as: {doc_type}")
 
-        # Check if the document type contains 'deed'
-        if "deed" in doc_label.lower():
-            # 1) If it's a PDF, render only the first page as an image.
-            if current.get("original_pdf_bytes"):
-                pdf_bytes = current["original_pdf_bytes"]
-                try:
-                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-                    page = doc.load_page(0)
-                    pix = page.get_pixmap()
-                    png_bytes = pix.tobytes("png")
-                    # Convert PNG bytes into a PIL Image for Streamlit
-                    img = Image.open(io.BytesIO(png_bytes))
-                    st.image(
-                        img,
-                        caption=f"{current['filename']} (First Page)",
-                        use_column_width=True
-                    )
-                except Exception as e:
-                    st.error(f"Error processing PDF: {e}")
+        # Image fallback
+        if current.get("image_bytes") and not current.get("original_pdf_bytes"):
+            st.image(
+                current["image_bytes"],
+                caption=f"{filename} (Image)",
+                use_column_width=True
+            )
 
-            # 2) Otherwise, if it's an uploaded image (e.g. JPEG), show that directly
-            elif current.get("image_bytes"):
-                st.image(
-                    current["image_bytes"],
-                    caption=f"{current['filename']} (Image)",
-                    use_column_width=True
-                )
+        # PDF viewer
+        elif current.get("original_pdf_bytes"):
+            pdf_bytes = current["original_pdf_bytes"]
 
-            # 3) If neither is available
-            else:
-                st.write("No PDF or image available.")
+            # Render pages → base64
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page_imgs = []
+            for page in doc:
+                pix = page.get_pixmap(matrix=fitz.Matrix(1, 1))
+                b64 = base64.b64encode(pix.tobytes("png")).decode("utf-8")
+                page_imgs.append(f"data:image/png;base64,{b64}")
+            doc.close()
 
-        # For non-title‑deed documents, show the extracted pages or full PDF/image
+            js_pages = json.dumps(page_imgs)
+            n_pages = len(page_imgs)
+
+            html = """
+            <div style="max-width:800px; margin:auto; border:1px solid #ccc; padding:8px;">
+              <img id="docImg" src="" style="width:100%; transform-origin:center center; transition: transform 0.2s;" />
+              <div style="text-align:center; margin-top:12px;">
+                <button id="prevBtn" style="
+                    background-color:#007bff;
+                    color:#fff;
+                    border:none;
+                    border-radius:4px;
+                    padding:6px 12px;
+                    margin-right:8px;
+                    cursor:pointer;
+                ">← Previous</button>
+                <span id="pageDisplay" style="font-weight:bold;">1/{n}</span>
+                <button id="nextBtn" style="
+                    background-color:#007bff;
+                    color:#fff;
+                    border:none;
+                    border-radius:4px;
+                    padding:6px 12px;
+                    margin-left:8px;
+                    cursor:pointer;
+                ">Next →</button>
+                <button id="rotateBtn" style="
+                    background-color:#6c757d;
+                    color:#fff;
+                    border:none;
+                    border-radius:4px;
+                    padding:6px 12px;
+                    margin-left:20px;
+                    cursor:pointer;
+                ">⟳ Rotate</button>
+              </div>
+            </div>
+            <script>
+            (function(){
+              const pages = """ + js_pages + """;
+              let idx = 0, rot = 0;
+              const imgEl = document.getElementById("docImg");
+              const pageEl = document.getElementById("pageDisplay");
+              document.getElementById("prevBtn").onclick = () => { if(idx>0) idx--; render(); };
+              document.getElementById("nextBtn").onclick = () => { if(idx<pages.length-1) idx++; render(); };
+              document.getElementById("rotateBtn").onclick = () => { rot = (rot + 90) % 360; render(); };
+              function render() {
+                imgEl.src = pages[idx];
+                imgEl.style.transform = `rotate(${rot}deg)`;
+                pageEl.textContent = (idx+1) + '/' + pages.length;
+              }
+              render();
+            })();
+            </script>
+            """.replace("{n}", str(n_pages))
+
+            # set height=1200 here
+            components.html(html, height=1200, scrolling=False)
+
         else:
-            if current.get("original_pdf_bytes"):
-                # If specific pages were extracted (e.g., IDs, passports, visas), render those
-                if "pages" in current and isinstance(current["pages"], list):
-                    try:
-                        partial_pdf_bytes = create_pdf_from_pages(
-                            current["original_pdf_bytes"],
-                            current["pages"]
-                        )
-                        pdf_base64 = base64.b64encode(partial_pdf_bytes).decode("utf-8")
-                        iframe = f"""
-                            <iframe
-                                src="data:application/pdf;base64,{pdf_base64}"
-                                width="600px" height="800px"
-                                style="border: none;"
-                                allow="autoplay">
-                            </iframe>
-                        """
-                        st.markdown(iframe, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"Error creating partial PDF: {e}")
-                else:
-                    # Otherwise, render the full PDF
-                    pdf_bytes = current["original_pdf_bytes"]
-                    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-                    iframe = f"""
-                        <iframe
-                            src="data:application/pdf;base64,{pdf_base64}"
-                            width="600px" height="800px"
-                            style="border: none;"
-                            allow="autoplay">
-                        </iframe>
-                    """
-                    st.markdown(iframe, unsafe_allow_html=True)
-
-            # If there's no PDF but we have an image_bytes field, show the image
-            elif current.get("image_bytes"):
-                st.image(
-                    current["image_bytes"],
-                    caption=f"{current['filename']} classified as: {doc_label}",
-                    use_column_width=True
-                )
-
-            else:
-                st.write("No PDF or image available.")
-
-
+            st.warning("No preview available for this document.")
         with col_ocr:
-            st.markdown("### Editable Extracted Data")
+            st.markdown("### Extracted Data")
             raw = current.get("extracted_data", "")
 #             st.write(raw)
             if "contract f" in current.get("doc_type","").lower():
@@ -1009,11 +1021,15 @@ if "results" in st.session_state and st.session_state.results:
 
             extracted_raw = raw
 
-            display_mode = st.radio("Display Mode", ("Form", "JSON"), index=0, key="display_mode")
+            display_mode = "Form"
             if display_mode == "Form":
                 updated = render_data_form(extracted_raw, selected_index)
-            else:
-                st.json(extracted_raw)
+                if updated is not None:
+                    # persist the edits
+                    st.session_state.results[selected_index]["extracted_data"] = updated
+                    # update our local copy so the form shows the new values immediately
+                    extracted_raw = updated
+
     # Optionally, you can display the filename/index information
     st.markdown(f"Selected Document: {selected_index + 1} of {len(st.session_state.results)}")
     st.markdown(f"Document {st.session_state.current_index + 1} of {len(st.session_state.results)}")
