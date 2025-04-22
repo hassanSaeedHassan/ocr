@@ -4,7 +4,7 @@ Based on the document's visible sections and content structure, please classify 
 
 Important Note :any bank letter should be classified as bank document
 1. legal – Documents issued by the Dubai government land department (e.g., title deed, pre title deed, title deed (lease to own), title deed (lease finance), initial contract of sale, restrain property certificate, initial contract of usufruct, usufruct right certificate, donation contract, contract f).
-2. company – Company related documents (e.g., moa memorandum of association, commercial license, incorporation certificate, company registration, incumbency certificate, translation of legal document) or documents served by jafza and dmcc giving no objection but for company not a property.
+2. company – Company related documents (e.g., moa memorandum of association, commercial license, incorporation certificate, company registration, incumbency certificate, translation of legal document) or documents served by jafza and dmcc giving no objection but for company not a property like company noc.
 3. bank – Bank related documents (e.g., cheques, mortgage contract, mortgage letter, release of mortgage, customer statement, registration tax, receipt).
 4. property – Property related documents (e.g., valuation report, noc non objection certificate).
 5. personal – Personal documents (e.g., ids, clearance certificate, acknowledgment,power of attorney (POA), power of attorney for specific property"وكالة" or 'وكالة خاصة بالعقارات' or 'توكيل رسمي' or 'توكيل رسمي خاص بالعقارات' ).
@@ -13,10 +13,11 @@ Important Note :any bank letter should be classified as bank document
 IMPORTANT NOTES:
 1.Legal documents should not be from the bank or the developer. If the document header contains the name of a bank, classify it as a bank document.
 2.power of attorney (POA) is considered personal document you will find key words like "بيانات الوكيل" or "بيانات الموكل" and you may find them repeated as tables and "توكيل"  in the header.
-3. there are two no objection certificates types one related to company (registration,or to own property)and the other is related to property and given by the developper. for example  the document is a non-objection certificate (noc) issued by the jafza (jebel ali freezone authority) to a company,should be company related document so make sure to classify them right
+3. there are two no objection certificates types one related to company (registration,or to own property)and the other is related to property and given by the developper. for example  the document is a non-objection certificate (noc) issued by the jafza (jebel ali freezone authority) or other authority to a company to can buy a property,should be company related document so make sure to classify them right
 4.if you find 'شهادة عدم ممانعة' in the document it must be either noc or company noc.
 5.the legal document must be issued from dubai government.
 6.the noc is a property document issued from the developer and contains the new purchaser and old purchaser details and non objection from the developer to transfer the ownership of the property.
+7. the company noc document you will find it as a letter given by authority to give the company the right to buy a property and you will find the license number of the company.
 """
 TD_vlm_prompt = """
 The image contains both **Arabic and English text**. Extract the text accurately while following these specific rules:
@@ -143,6 +144,8 @@ Ensure that the extracted information is returned in JSON format, with the follo
 }
 """
 
+
+
 NOC_vlm_prompt = """
 Please extract the following information from the provided document image:
 1. **Issuing Date**: If the issuing date is mentioned, provide it in the format dd/mm/yyyy. If not mentioned, return "not mentioned". The issuing date may appear under the field "التاريخ". For example, if the date is given as "2025 يناير - 2", it should be converted and returned as "02/01/2025" (dd/mm/yyyy).
@@ -159,6 +162,7 @@ Please extract the following information from the provided document image:
 
 Return the extracted information strictly in JSON format with appropriate keys.
 """
+
 
 
 
@@ -260,8 +264,10 @@ This document has been identified as a legal document issued by the Dubai govern
    - Does not contain "الموضوع" or "طلب" or letter body.
 
 3. **title deed lease to own**:
-   - Similar to title deed, but header contains "title deed lease to own".
+   - header must contain "title deed lease to own" and in arabic ('شهادة ملكية عقار مقيد بحق الإجازة') or "شهادة ملكية العقار (إجازة) ".
    - Contains **owners numbers and their shares** and **lessees and their shares**.
+   - Note lesses and their shares must be found.
+   - Note the mortagage status will not be found in the data.
 
 4. **title deed lease finance**:
    - Similar to title deed, but header contains "title deed lease finance".
@@ -328,12 +334,14 @@ Return the name of the document and If the document does not clearly match any o
 # For property related documents:
 PROPERTY_PROMPT = """
 This document has been identified as a property related document. Based on its visible sections and content structure, please classify it into one of the following types. Return only the type in lowercase.
-
+NOTE JAFZA is not a developper it is government authority so the documents issued from it would be company noc.
+- company noc: a non objection certificate document is given from authority like JAFZA to give the company the right to buy or sell or transfer a property so you will find it as a letter given from the authority mentioning the company license number and its right to have a property.
 - valuation report: contains property valuation details, company information, evaluation results, and certification.
-- noc non objection certificate: A document that exclusively contains non objection certificate details. The header and content may include any of the following: "non objection certificate", "رسالة عدم ممانعة", or "شهادة عدم ممانعة" or شهادة لا مانع" ,  "شهادة عدم ممانعة لنقل وحدة","عدم ممانعة تحويل جزئي لملكية عقار","لا مانع من تحويل عقار","شهادة عدم ممانعة من تحويل ملكية عقار","لا مانع من بيع و تسجيل وحدة", "لا مانع من التحويل و التسجيل النهائي و اصدار شهادة حق منفعة", "رسالة لا مانع". 
+- noc non objection certificate: A document that exclusively contains non objection certificate details. The header and content may include any of the following: "non objection certificate", "رسالة عدم ممانعة", or "شهادة عدم ممانعة" or شهادة لا مانع" ,  "شهادة عدم ممانعة لنقل وحدة","عدم ممانعة تحويل جزئي لملكية عقار","لا مانع من تحويل عقار","شهادة عدم ممانعة من تحويل ملكية عقار","لا مانع من بيع و تسجيل وحدة", "لا مانع من التحويل و التسجيل النهائي و اصدار شهادة حق منفعة", "رسالة لا مانع" and shouldn't be from JAFZA. 
 - soa : statment of accounts from the developer of the property.
-It must not be confused with a release mortgage.If the document does not clearly match any of these, return "property".
 
+It must not be confused with a release mortgage.If the document does not clearly match any of these, return "property".
+again if you think the document is noc non objection certificate it should contain the purchaser and seller details so before giving the final classification check also if JAFZA (jabal ali free zone)logo is found in the top as most of the time this should be company noc.
 Return the name of the document and if can't return property"""
 
 # For personal documents:
