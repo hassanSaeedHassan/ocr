@@ -1018,7 +1018,9 @@ if "results" in st.session_state and st.session_state.results:
                     pages = preprocess_pages(raw, clean_json_string)
                     # 3) Now run your (page‑independent) unifier on `pages`
                     raw = unify_contract_f(pages, clean_json_string)
-
+            elif "commercial license" in current.get("doc_type","").lower():
+#                 st.write(raw)
+                raw = unify_commercial_license(raw, clean_json_string)
             extracted_raw = raw
 
             display_mode = "Form"
