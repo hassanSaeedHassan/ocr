@@ -40,26 +40,33 @@ The image contains both **Arabic and English text**. Extract the text accurately
 #### **2. Owners Numbers and Their Shares:**
 - Extract details for **each owner**, ensuring:
   - `"Owner ID"` → Extract the numeric ID.
-  - `"Owner Name (English)"` → Extract the **English name**.
-  - `"Owner Name (Arabic)"` → Extract the **Arabic name**.
+  - `"Owner Name (English)"` → Extract the **English name**. (don't but the id in this field)
+  - `"Owner Name (Arabic)"` → Extract the **Arabic name**. (don't but the id in this field)
   - `"Share (Sq Meter)"` → Extract numerical value.
 - Return the owners' details as an array under `"Owners"`:
   ```json
   "Owners": [
     {
       "Owner ID": "<Extracted ID>",
-      "Owner Name (English)": "<Extracted Name>",
-      "Owner Name (Arabic)": "<Extracted Name>",
+      "Owner Name (English)": "<Extracted Name without the id>",
+      "Owner Name (Arabic)": "<Extracted Name without the id>",
       "Share (Sq Meter)": "<Extracted Value>"
     },
     ...
   ]
 #### **3.  Lessees if exists Numbers and Their Shares:**
-
+  Note for the names they might be written in two lines for example
+  lessees numbers and their shares:                  Area(Sq Meter)                               ارقام و اسماء الملاك و حصصهم
+  (9132877)  HASSAN SAEED HASSAN                       75.2                                                 حسن سعيد حسن
+  Ahmed                                                                                                             احمد
+so the English name should be (HASSAN SAEED HASSAN AHMED)                                                                                   
+and the arabic name should be (حسن سعيد حسن احمد)
+the id should be 9132877
+share should be 75.2
 - Extract details for **each lessees**, ensuring if exists:
   - `"Lessees ID"` → Extract the numeric ID.
-  - `"Lessees Name (English)"` → Extract the **English name**.
-  - `"Lessees Name (Arabic)"` → Extract the **Arabic name**.
+  - `"Lessees Name (English)"` → Extract the **English name**. (don't but the id in this field)
+  - `"Lessees Name (Arabic)"` → Extract the **Arabic name**. (don't but the id in this field)
   - `"Share (Sq Meter)"` → Extract numerical value.
 - Return the lessees' details as an array under `"Lessees"`:
   ```json
@@ -67,8 +74,8 @@ The image contains both **Arabic and English text**. Extract the text accurately
       "Lessees": [
     {
       "Lessee ID": "<Extracted ID>",
-      "Lessee Name (English)": "<Extracted Name>",
-      "Lessee Name (Arabic)": "<Extracted Name>",
+      "Lessee Name (English)": "<Extracted Name without the id>",
+      "Lessee Name (Arabic)": "<Extracted Name without the id>",
       "Share (Sq Meter)": "<Extracted Value>"
     },
     ...
@@ -89,7 +96,11 @@ The image contains both **Arabic and English text**. Extract the text accurately
 - **Maintain the original structure of the document, ensuring all sections are properly categorized.**
 - **Preserve correct numerical formats, special characters, and accurate text encoding.**
 """
+#   owners numbers and their shares:            
+#   (9132877)  HASSAN SAEED HASSAN                                                            
+#   Ahmed                                                                                                             
 
+# so in this example there is one owner
 Titledeed__prompt = """
 The image contains both **Arabic and English text**. Extract the text accurately while following these specific rules:
 
@@ -104,6 +115,7 @@ The image contains both **Arabic and English text**. Extract the text accurately
 - **Ensure all sections and fields are included, even if they vary based on document type**.
 - **Do NOT include any Chinese, Japanese, or non-Arabic/non-English characters.**
 - **Ensure numerical values are extracted accurately and formatted correctly.**
+- ** Note** for the names they might be written in two lines 
 
 ---
 
@@ -135,6 +147,7 @@ The image contains both **Arabic and English text**. Extract the text accurately
   - `"Owner Name (English)"` → Extract the **English name**.
   - `"Owner Name (Arabic)"` → Extract the **Arabic name**.
   - `"Share (Sq Meter)"` → Extract numerical value.
+
 - Return the owners' details as an array under `"Owners"`:
   ```json
   "Owners": [
