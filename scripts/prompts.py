@@ -146,7 +146,7 @@ Ensure that the extracted information is returned in JSON format, with the follo
 
 
 
-NOC_vlm_prompt = """
+NOC_vlm_prompt2 = """
 Please extract the following information from the provided document image:
 1. **Issuing Date**: If the issuing date is mentioned, provide it in the format dd/mm/yyyy. If not mentioned, return "not mentioned". The issuing date may appear under the field "التاريخ". For example, if the date is given as "2025 يناير - 2", it should be converted and returned as "02/01/2025" (dd/mm/yyyy).
 2. **Developer Name**: Extract the developer name from the top of the document, ensuring that the name is in English only. If not mentioned, return "not mentioned".
@@ -164,6 +164,52 @@ Return the extracted information strictly in JSON format with appropriate keys.
 """
 
 
+NOC_vlm_prompt="""
+Extract the names of the following individuals from the English section of this NOC document:
+- Note there is a difference between current purchaser this is the seller and new purchaser this is the buyer.
+  • Sellers: individuals referred to as "The Seller" or owners details or "current purchased details" or 'requestor details'
+  • Buyers: individuals referred to as "The Buyer" or 'New Purchaser' or "Principal purchaser"
+Note :
+    - some times it is written in arabic and the seller are mentioned indirectly by transfer from (seller name(s)) to (الى) (buyer name(s))
+    - and if "from" or "من"is before the person name (it means one of the sellers).
+    - if "to" or "الى" is before the person name (it means one of the buyers).
+    - you should ignore all of this if a table exists containing the data of sellers and buyers.
+    - example on this note :
+            - you may find each person in a line like this (multiple "From" and multiple "To")
+            - **From:** (place holder for seller name) – Holder of (place holder for nationality) passport (place holder for the passport number)
+            - **From:** (place holder for seller name) - Holder of License(place holder for the company license)
+            - **To:**  (place holder for buyer name) – Holder of (place holder for nationality) passport (place holder for the passport number)
+            - so if you find this any name beside "From" should be seller and any name beside "To" should be buyer.
+            - the keywords "From" and "To" are tricky so stick to the template if they found.
+if the names are found only in Arabic use them in Arabic.
+also the names could be very long( contain details name (5 or 6))
+For each person, extract:
+  - name: full name (e.g., "Mr. Samuel Dunnachie")
+Also sometimes the seller or the buyer is not found.
+- also extract the following:
+    - community(can be found as unit location),unit number and plot number.
+    - Issuing Date: If the issuing date is mentioned, provide it in the format dd/mm/yyyy. If not mentioned, return "not mentioned". The issuing date may appear under the field "التاريخ". For example, if the date is given as "2025 يناير - 2", it should be converted and returned as "02/01/2025" (dd/mm/yyyy).
+    - Validation Date or Period: Check for a validation field, which may be labeled as "صلاحية شهادة عدم الممانعة" or similar. If a validation date is mentioned, return it in the format dd/mm/yyyy. If a validation period is mentioned instead, extract the period and return it as follows:
+       - For example, if the document states "this certificate is valid for 15 days from the issuing date", return "15 days".
+       - If the period is given in Arabic words (e.g., "اربعة عشر"), convert it to its numeric equivalent and append " days" (e.g., "14 days").
+       - If the term "شهر" is used, return "30 days".
+       - sometimes it is found as expiry date.
+       - If neither a validation date nor period is mentioned, return "not mentioned".
+    - Dubai Land Department: Check if the document contains a reference to the Dubai Land Department. This may be mentioned as "Dubai Land Department", "دائرة الاراضي و الاملاك دبي", or in variations such as "يبد كلاملأاو يضارلأا ةرئاد". Return "Found" if present, otherwise return "not mentioned".
+- also a flag mentioning arabic exists or not
+Return a single JSON object:
+{
+  "sellers": [ "Seller Name 1", "Seller Name 2", … ],
+  "buyers":  [ "Buyer Name 1", "Buyer Name 2", … ],
+  "unit number":'Unit number',
+  'community':'Community',
+  'plot number':'Plot Number',
+  'issung date':'Issuing Date',
+  'Validation Date or Period':'Validation Date or Period',
+  'Dubai Land Department': Found | not Found,
+  'Arabic Found': Found | not Found
+}
+"""
 
 
 TD_vlm_prompt2 = """
@@ -335,13 +381,13 @@ Return the name of the document and If the document does not clearly match any o
 PROPERTY_PROMPT = """
 This document has been identified as a property related document. Based on its visible sections and content structure, please classify it into one of the following types. Return only the type in lowercase.
 NOTE JAFZA is not a developper it is government authority so the documents issued from it would be company noc.
-- company noc: a non objection certificate document is given from authority like JAFZA to give the company the right to buy or sell or transfer a property so you will find it as a letter given from the authority mentioning the company license number and its right to have a property.
+- company noc: a non objection certificate document is given from authority like (JAFZA,DMCC,dubai development authority) to give the company the right to buy or sell or transfer a property so you will find it as a letter given from the authority mentioning the company license number and its right to have a property.
 - valuation report: contains property valuation details, company information, evaluation results, and certification.
 - noc non objection certificate: A document that exclusively contains non objection certificate details. The header and content may include any of the following: "non objection certificate", "رسالة عدم ممانعة", or "شهادة عدم ممانعة" or شهادة لا مانع" ,  "شهادة عدم ممانعة لنقل وحدة","عدم ممانعة تحويل جزئي لملكية عقار","لا مانع من تحويل عقار","شهادة عدم ممانعة من تحويل ملكية عقار","لا مانع من بيع و تسجيل وحدة", "لا مانع من التحويل و التسجيل النهائي و اصدار شهادة حق منفعة", "رسالة لا مانع" and shouldn't be from JAFZA. 
 - soa : statment of accounts from the developer of the property.
 
 It must not be confused with a release mortgage.If the document does not clearly match any of these, return "property".
-again if you think the document is noc non objection certificate it should contain the purchaser and seller details so before giving the final classification check also if JAFZA (jabal ali free zone)logo is found in the top as most of the time this should be company noc.
+again if you think the document is noc non objection certificate it should contain the purchaser and seller details so before giving the final classification check also if (JAFZA "jabal ali free zone",DMCC,dubai development authority)logo is found in the top as most of the time this should be company noc.
 Return the name of the document and if can't return property"""
 
 # For personal documents:
