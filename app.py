@@ -1021,6 +1021,18 @@ if "results" in st.session_state and st.session_state.results:
             elif "commercial license" in current.get("doc_type","").lower():
 #                 st.write(raw)
                 raw = unify_commercial_license(raw, clean_json_string)
+            elif current.get("doc_type","").lower()=='title deed':
+                raw = unify_title_deed(raw, clean_json_string)
+            elif current.get("doc_type","").lower()=='usufruct right certificate':
+                raw = unify_usufruct_right_certificate(raw, clean_json_string)
+            elif current.get("doc_type","").lower()=='pre title deed':
+                raw = unify_pre_title_deed(raw, clean_json_string)
+            elif current.get("doc_type","").lower() in ['title deed lease finance'] :
+                raw = unify_title_deed_lease_finance(raw, clean_json_string)
+            elif current.get("doc_type","").lower() in ['title deed lease to own'] :
+                raw = unify_title_deed_lease_to_own(raw, clean_json_string)
+            elif current.get("doc_type","").lower() in ['cheques'] :
+                raw = unify_cheques(raw, clean_json_string)
             extracted_raw = raw
 
             display_mode = "Form"
