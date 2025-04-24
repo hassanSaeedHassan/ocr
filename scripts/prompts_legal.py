@@ -115,8 +115,12 @@ The image contains both **Arabic and English text**. Extract the text accurately
 - **Ensure all sections and fields are included, even if they vary based on document type**.
 - **Do NOT include any Chinese, Japanese, or non-Arabic/non-English characters.**
 - **Ensure numerical values are extracted accurately and formatted correctly.**
-- ** Note** for the names they might be written in two lines 
+- ** Note** for the names they might be written in two lines as the person name could be composite of (5 or 6 names) for example
 
+       owners numbers and their shares:            
+       (9132877)  HASSAN SAEED HASSAN                                                            
+       Ahmed  
+  this should be one person named HASSAN SAEED HASSAN AHMED
 ---
 
 ### **Section-Specific Rules:**
@@ -214,6 +218,7 @@ The image contains both **Arabic and English text**. Extract the text accurately
   - `"Area Sq Meter"`
   - `"Area Sq Feet"`
   - `"Common Area"`
+  - `"Right Type"`
 
 #### **2. Lessors and lessees if exists Numbers and Their Shares:**
 
