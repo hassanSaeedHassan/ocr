@@ -356,7 +356,8 @@ def process_multi_document_ids(file_data, filename):
                 "pages": [page_idx+1],
                 "image_bytes": current_image,
                 "extracted_data": extracted,
-                "original_pdf_bytes": pdf_bytes
+                "original_pdf_bytes": pdf_bytes,
+                "pdf_bytes": create_pdf_from_pages(pdf_bytes, pages_used)
             }
             groups.append(group)
             page_idx += 1
@@ -775,6 +776,16 @@ def process_document(file_data, filename):
     }
     if filename.lower().endswith("pdf"):
         result["original_pdf_bytes"] = original_pdf_bytes
+        # build a PDF containing all pages
+        all_pages = list(
+            range(
+                1,
+                fitz.open(stream=original_pdf_bytes, filetype="pdf")
+                   .page_count
+                + 1
+            )
+        )
+        result["pdf_bytes"] = create_pdf_from_pages(original_pdf_bytes, all_pages)
     
     return result
 # ---------- STREAMLIT UI ----------
@@ -829,7 +840,13 @@ if st.button("Submit") and uploaded_files:
     
 if st.button("Save All Documents") and not st.session_state.get("documents_saved", False):
     for result in st.session_state.results:
-        save_document(result)
+        # prefer a sub‑doc PDF if available, else fallback to original
+        pdf_data = result.get("pdf_bytes", result.get("original_pdf_bytes"))
+        # clone & override so save_document sees the right bytes
+        result_to_save = result.copy()
+        result_to_save["original_pdf_bytes"] = pdf_data
+        save_document(result_to_save)
+
     st.session_state.documents_saved = True
     st.success("Documents saved successfully.")
 
