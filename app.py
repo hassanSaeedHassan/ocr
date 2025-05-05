@@ -983,13 +983,14 @@ if "results" in st.session_state and st.session_state.results:
             )
 
         # PDF viewer
-        elif current.get("original_pdf_bytes"):
-            pdf_bytes = current["original_pdf_bytes"]
-
-            # Render pages → base64
+        elif current.get("pdf_bytes") or current.get("original_pdf_bytes"):
+            # prefer the split‑out PDF if you have it
+            pdf_bytes = current.get("pdf_bytes", current["original_pdf_bytes"])
+        
+            # Render only those pages
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_imgs = []
-            for page in doc:
+            for page in doc:               # now doc only contains the pages you sliced
                 pix = page.get_pixmap(matrix=fitz.Matrix(1, 1))
                 b64 = base64.b64encode(pix.tobytes("png")).decode("utf-8")
                 page_imgs.append(f"data:image/png;base64,{b64}")
