@@ -1028,7 +1028,7 @@ if "results" in st.session_state and st.session_state.results:
       function render() {{
         img.src = pages[idx];
         img.style.transform = `scale(${{zoom}}) rotate(${{rot}}deg)`;
-        disp.textContent = `${{idx+1}}/{n}`;
+        disp.textContent = `${{idx+1}}/{n_pages}`;
         img.style.cursor = zoom>1 ? 'zoom-out' : 'zoom-in';
       }}
 
