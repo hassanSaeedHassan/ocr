@@ -254,15 +254,14 @@ def render_data_form(extracted_data, form_key):
         # When they click “Save Changes”:
         submitted = st.form_submit_button("Save Changes")
         if submitted:
-            # 1) persist the edits
             st.session_state.results[form_key]["extracted_data"] = form_inputs
-
-            # 2) record a timestamp so we can force-refresh the Roles expander
-            st.session_state["last_save"] = datetime.utcnow().isoformat()
-
-            # 3) give feedback then restart the script
             st.success("Changes saved!")
-            st.experimental_rerun()
+            # force the whole script to restart now that session_state is updated
+            try:
+                st.experimental_rerun()
+            except AttributeError:
+                # if your Streamlit version lives under st.rerun()
+                st.rerun()
 
     # returning here is optional—once we rerun the app, you’ll see the updated form
     return None
@@ -835,12 +834,13 @@ if st.button("Save All Documents") and not st.session_state.get("documents_saved
     st.success("Documents saved successfully.")
 
 if "results" in st.session_state and st.session_state.results:
-    last = st.session_state.get("last_save", "initial")
+
     # — Group roles & validations under one section —
     st.markdown("### Roles and validations")
     # 1) Roles accordion
-    with st.expander("Roles and validations", expanded=True, key=f"roles_{last}"):
+    with st.expander("Roles and validations", expanded=True):
         render_person_roles_editor(st.session_state.results)
+
 
     # 2) Validation accordion (skipping IDs & Passports)
     validation_outcomes = validate_documents(st.session_state.results)
