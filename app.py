@@ -259,7 +259,7 @@ def render_data_form(extracted_data, form_key):
             # 2) Give immediate feedback
             st.success("Changes saved!")
             # 3) Rerun so the new values are re‑rendered
-            st.experimental_rerun()
+            # st.experimental_rerun()
 
     # returning here is optional—once we rerun the app, you’ll see the updated form
     return None
@@ -958,7 +958,7 @@ if "results" in st.session_state and st.session_state.results:
             st.image(
                 current["image_bytes"],
                 caption=f"{filename} (Image)",
-                use_column_width=True
+                use_container_width=True
             )
 
         # PDF viewer
