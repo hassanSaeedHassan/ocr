@@ -134,118 +134,7 @@ def unify_poa_data(raw_data) -> dict:
         virtues = {f'virtue_attorney {i+1}': rec for i, rec in enumerate(virtues_list)}
         result['virtue_attorneys'] = virtues
     return result
-def unify_poa_data_old(raw_data) -> dict:
-    """
-    Normalize raw POA output into a dict with:
-      - principals: mapping "principal {i}" → record
-      - attorneys:  mapping "attorney {i}" → record
-    Always returns at least one (empty) entry if none found.
-    Drops virtue_attorneys if empty.
 
-    Special handling:
-      * If any record has a 'role' field, classification is driven by:
-          - 'وكيل' in role → principal
-          - 'موكل' in role → attorney
-      * passport_number → passport_no
-      * Passport numbers starting with '784' reclassified as emirates_id
-      * Only digits are kept in emirates_id
-      * Duplicate records with identical names are collapsed (no concatenation)
-      * Records with same ID but different names are merged by concatenation
-    """
-    # 1) Parse raw_data into dict
-    if isinstance(raw_data, str):
-        try:
-            poa = json.loads(raw_data)
-        except json.JSONDecodeError:
-            poa = safe_json_loads(raw_data)
-    elif isinstance(raw_data, dict):
-        poa = raw_data
-    else:
-        poa = {}
-
-    # 2) Aggregate all entries for role-based classification
-    all_records = []
-    for section in ('principals', 'attorneys', 'virtue_attorneys'):
-        items = poa.get(section)
-        if isinstance(items, list):
-            for rec in items:
-                if isinstance(rec, dict):
-                    all_records.append(rec)
-
-    # 3) Determine if we should use 'role' for classification
-    role_based = any('role' in rec for rec in all_records)
-    if role_based:
-        principals_raw = [r for r in all_records if 'وكيل' in r.get('role', '')]
-        attorneys_raw  = [r for r in all_records if 'موكل' in r.get('role', '')]
-    else:
-        principals_raw = poa.get('principals') if isinstance(poa.get('principals'), list) else []
-        attorneys_raw  = poa.get('attorneys')  if isinstance(poa.get('attorneys'), list)  else []
-    virtues_raw = poa.get('virtue_attorneys') if isinstance(poa.get('virtue_attorneys'), list) else []
-
-    # 4) Cleaning helpers
-    def clean_name(name: str) -> str:
-        return re.sub(r'^(?:Mr\.|Mrs\.|Ms\.)\s*', '', (name or '')).strip()
-
-    def clean_nationality(nat: str) -> str:
-        return re.sub(r'\bالجنسية|\s*Nationality$', '', (nat or '')).strip()
-
-    # 5) Normalize single record
-    def normalize_record(rec: dict) -> dict:
-        name = clean_name(rec.get('name', ''))
-        nationality = clean_nationality(rec.get('nationality', ''))
-        # unify passport field
-        pid = rec.get('passport_no', '') or rec.get('passport_number', '') or ''
-        eid = rec.get('emirates_id', '') or rec.get('national_id', '') or ''
-        # fallback document_number
-        if not eid and not pid:
-            dt, dn = rec.get('document_type', ''), rec.get('document_number', '')
-            if 'هوية' in dt:
-                eid = dn
-            else:
-                pid = dn
-        # reclassify passport-looking ID
-        if pid.startswith('784'):
-            eid, pid = pid, ''
-        # keep digits only for eid
-        eid = re.sub(r'\D', '', eid)
-        return {'name': name, 'nationality': nationality, 'emirates_id': eid, 'passport_no': pid}
-
-    # 6) Deduplicate and merge
-    def dedupe(records):
-        seen = {}
-        for rec in (records or []):
-            if not isinstance(rec, dict):
-                continue
-            norm = normalize_record(rec)
-            key = norm['emirates_id'] or norm['passport_no'] or norm['name']
-            if not key:
-                continue
-            if key in seen:
-                # if same name, skip; else concatenate
-                if seen[key]['name'] != norm['name']:
-                    seen[key]['name'] += ' ' + norm['name']
-            else:
-                seen[key] = norm
-        return list(seen.values())
-
-    principals_list = dedupe(principals_raw)
-    attorneys_list  = dedupe(attorneys_raw)
-    virtues_list    = dedupe(virtues_raw)
-
-    # 7) Ensure at least one empty
-    if not principals_list:
-        principals_list = [{'name':'','nationality':'','emirates_id':'','passport_no':''}]
-    if not attorneys_list:
-        attorneys_list = [{'name':'','nationality':'','emirates_id':'','passport_no':''}]
-
-    # 8) Convert to keyed dict
-    principals = {f'principal {i+1}': rec for i, rec in enumerate(principals_list)}
-    attorneys  = {f'attorney {i+1}':  rec for i, rec in enumerate(attorneys_list)}
-    result = {'principals': principals, 'attorneys': attorneys}
-    if virtues_list:
-        virtues = {f'virtue_attorney {i+1}': rec for i, rec in enumerate(virtues_list)}
-        result['virtue_attorneys'] = virtues
-    return result
 
 
 # ------------------------- Prompts -------------------------
@@ -392,7 +281,7 @@ def extract_power_of_attorney(pdf_path: str, max_pages: int = None) -> dict:
         doc.close()
 
     # 3) Parse and clean raw JSON output
-#     st.write(extracted_raw)
+    st.write(extracted_raw)
     raw = extracted_raw or ""
     if isinstance(raw, str):
         raw = raw.strip()
@@ -416,7 +305,7 @@ def extract_power_of_attorney(pdf_path: str, max_pages: int = None) -> dict:
             ""
         )
         fixed, _ = call_vlm([{"type": "text", "text": conv}], _client)
-#         st.write(fixed)
+        st.write(fixed)
         try:
             parsed = json.loads(fixed)
         except json.JSONDecodeError:
