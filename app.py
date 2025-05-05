@@ -20,6 +20,7 @@ from scripts.unification import *
 from scripts.poa_extractor import *
 from scripts.vlm_utils import create_pdf_from_pages
 from scripts.procedure_recognition import suggest_procedure
+import streamlit.components.v1 as components
 
 # ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
 if "client" not in st.session_state:
