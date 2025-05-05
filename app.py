@@ -6,6 +6,7 @@ import tempfile
 import io
 import os
 import json
+import zipfile
 from datetime import datetime
 from PIL import Image, ImageOps
 from scripts.validation import *    # This imports safe_json_loads, validate_documents, save_document, etc.
@@ -350,10 +351,11 @@ def process_multi_document_ids(file_data, filename):
                 extracted = json.loads(cleaned)
             except json.JSONDecodeError:
                 extracted = {"raw_text": extraction_response}
+            pages = [page_idx + 1]
             group = {
                 "filename": filename,
                 "doc_type": detail_type,
-                "pages": [page_idx+1],
+                "pages": pages,
                 "image_bytes": current_image,
                 "extracted_data": extracted,
                 "original_pdf_bytes": pdf_bytes,
@@ -465,7 +467,8 @@ def process_multi_document_ids(file_data, filename):
                 "pages": pages_used,
                 "image_bytes": group_front_img,
                 "extracted_data": combined_extracted,
-                "original_pdf_bytes": pdf_bytes
+                "original_pdf_bytes": pdf_bytes,
+                "pdf_bytes": create_pdf_from_pages(pdf_bytes, pages_used)
             }
             groups.append(group)
         else:
@@ -839,16 +842,25 @@ if st.button("Submit") and uploaded_files:
     st.success(f"Total processing time: {overall_end_time - overall_start_time:.2f} seconds")
     
 if st.button("Save All Documents") and not st.session_state.get("documents_saved", False):
-    for result in st.session_state.results:
-        # prefer a sub‑doc PDF if available, else fallback to original
-        pdf_data = result.get("pdf_bytes", result.get("original_pdf_bytes"))
-        # clone & override so save_document sees the right bytes
-        result_to_save = result.copy()
-        result_to_save["original_pdf_bytes"] = pdf_data
-        save_document(result_to_save)
 
+    # build an in-memory ZIP of every standalone PDF
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as zf:
+        for idx, result in enumerate(st.session_state.results, start=1):
+            pdf_data = result.get("pdf_bytes", result.get("original_pdf_bytes"))
+            # give each file a unique name
+            name = f"{result['filename']}_{result['doc_type']}_{idx}.pdf"
+            zf.writestr(name, pdf_data)
+    zip_buffer.seek(0)
+
+    # stream it to the browser
+    st.download_button(
+        "Download All Documents as ZIP",
+        data=zip_buffer,
+        file_name="documents.zip",
+        mime="application/zip",
+    )
     st.session_state.documents_saved = True
-    st.success("Documents saved successfully.")
 
 if "results" in st.session_state and st.session_state.results:
 
