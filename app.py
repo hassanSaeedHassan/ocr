@@ -352,6 +352,7 @@ def process_multi_document_ids(file_data, filename):
             except json.JSONDecodeError:
                 extracted = {"raw_text": extraction_response}
             pages = [page_idx + 1]
+        
             group = {
                 "filename": filename,
                 "doc_type": detail_type,
@@ -359,7 +360,8 @@ def process_multi_document_ids(file_data, filename):
                 "image_bytes": current_image,
                 "extracted_data": extracted,
                 "original_pdf_bytes": pdf_bytes,
-                "pdf_bytes": create_pdf_from_pages(pdf_bytes, pages_used)
+                # correctly slice out just `pages`
+                "pdf_bytes": create_pdf_from_pages(pdf_bytes, pages),
             }
             groups.append(group)
             page_idx += 1
@@ -735,19 +737,7 @@ def process_document(file_data, filename):
             }
             result["original_pdf_bytes"] = original_pdf_bytes
         return result
-#     elif doc_type in ['POA','poa']:
-#         doc_type = 'POA'
-#         file_data.seek(0)
-#         extracted_data = extract_data_from_pdf_pages_poa(file_data, LANGUAGE_PROMPT, POA_PROMPT_ENG, POA_PROMPT_ARABIC)
-#         if filename.lower().endswith("pdf"):
-#             result = {
-#                 "filename": filename,
-#                 "doc_type": doc_type,
-#                 "image_bytes": adjusted_image_bytes,
-#                 "extracted_data": extracted_data
-#             }
-#             result["original_pdf_bytes"] = original_pdf_bytes
-#         return result
+
     elif doc_type in ['POA','poa']:
         doc_type = 'POA'
         # make sure we’re at the start of the stream
