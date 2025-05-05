@@ -189,6 +189,7 @@ which will be found in the first paragraph in the document so ignore the terms.
 - Note sometimes the data is in tables with header indicating the role, first column name, second nationality,
   third document type, fourth document number; ignore other columns.
 - Do not repeat the same person under multiple roles.
+- so if there is no tables you need to extract the whole paragraph declaring who are the principals and attorneys.
 """
 )
 
