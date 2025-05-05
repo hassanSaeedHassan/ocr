@@ -184,12 +184,12 @@ POA_PROMPT_ARABIC = (
     """
 extract the text data including the names of persons mentioned and the roles in arabic either principal or attorney
 which will be found in the first paragraph in the document so ignore the terms.
-- note you will find و يشار اليه بالوكيل after the details of the attorneys
-- while you will find "ويشار اليه بالموكل" after the details of the principals
 - Note sometimes the data is in tables with header indicating the role, first column name, second nationality,
   third document type, fourth document number; ignore other columns.
 - Do not repeat the same person under multiple roles.
-- so if there is no tables you need to extract the whole paragraph declaring who are the principals and attorneys and mention the role in english.
+- so if there is no tables you need to extract the whole paragraph declaring who are the principals and attorneys and mention the role in english (Either principal or attorney).
+- note you will find و يشار اليه بالوكيل after the details of the attorneys
+- while you will find "ويشار اليه بالموكل" after the details of the principals
 """
 )
 
