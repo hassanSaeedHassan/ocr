@@ -282,7 +282,7 @@ def extract_power_of_attorney(pdf_path: str, max_pages: int = None) -> dict:
         doc.close()
 
     # 3) Parse and clean raw JSON output
-    st.write(extracted_raw)
+    # st.write(extracted_raw)
     raw = extracted_raw or ""
     if isinstance(raw, str):
         raw = raw.strip()
@@ -306,7 +306,7 @@ def extract_power_of_attorney(pdf_path: str, max_pages: int = None) -> dict:
             ""
         )
         fixed, _ = call_vlm([{"type": "text", "text": conv}], _client)
-        st.write(fixed)
+        # st.write(fixed)
         try:
             parsed = json.loads(fixed)
         except json.JSONDecodeError:
