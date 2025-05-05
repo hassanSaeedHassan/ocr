@@ -351,7 +351,9 @@ def process_multi_document_ids(file_data, filename):
                 extracted = json.loads(cleaned)
             except json.JSONDecodeError:
                 extracted = {"raw_text": extraction_response}
+
             pages = [page_idx + 1]
+            sliced_pdf = create_pdf_from_pages(pdf_bytes, pages)
         
             group = {
                 "filename": filename,
@@ -360,8 +362,7 @@ def process_multi_document_ids(file_data, filename):
                 "image_bytes": current_image,
                 "extracted_data": extracted,
                 "original_pdf_bytes": pdf_bytes,
-                # correctly slice out just `pages`
-                "pdf_bytes": create_pdf_from_pages(pdf_bytes, pages),
+                "pdf_bytes": sliced_pdf        # ← use 'pages' not 'pages_used'
             }
             groups.append(group)
             page_idx += 1
