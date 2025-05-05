@@ -260,7 +260,7 @@ def render_data_form(extracted_data, form_key):
             st.success("Changes saved!")
             # 3) Rerun so the new values are re‑rendered
             # st.experimental_rerun()
-            return form_inputs
+            st.experimental_set_query_params(updated=str(time.time()))
 
     # returning here is optional—once we rerun the app, you’ll see the updated form
     return None
@@ -1120,11 +1120,7 @@ if "results" in st.session_state and st.session_state.results:
 
             display_mode = "Form"
             if display_mode == "Form":
-                updated = render_data_form(extracted_raw, selected_index)
-                if updated:
-                    # we already saved to session_state above,
-                    # now immediately override our local copy so the form re‑draws with the new data
-                    extracted_raw = updated
+                render_data_form(extracted_raw, selected_index)
 
     # Optionally, you can display the filename/index information
     st.markdown(f"Selected Document: {selected_index + 1} of {len(st.session_state.results)}")
