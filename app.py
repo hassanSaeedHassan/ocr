@@ -2,6 +2,7 @@ import streamlit as st
 import time
 import fitz  # PyMuPDF
 import base64
+import tempfile
 import io
 import os
 import json
@@ -16,9 +17,9 @@ from scripts.company_prompts import *
 from scripts.prompts import *
 from scripts.ui_functions import *
 from scripts.unification import *
+from scripts.poa_extractor import *
 from scripts.vlm_utils import create_pdf_from_pages
 from scripts.procedure_recognition import suggest_procedure
-import streamlit.components.v1 as components
 
 # ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
 if "client" not in st.session_state:
@@ -605,7 +606,7 @@ def process_document(file_data, filename):
         extraction_prompt = ID_vlm_prompt
     elif doc_type == "cheques":
         extraction_prompt = cheque_vlm_prompt
-    elif doc_type in ["mortgage letter", "liability letter"]:
+    elif doc_type in ["mortgage letter", "liability letter","mortgage contract"]:
         extraction_prompt = MORTGAGE_LETTER_EXTRACTION_PROMPT
     elif doc_type in ["title deed (lease to own)", "title deed lease to own"]:
         extraction_prompt = TD_lease_vlm_prompt
@@ -650,9 +651,22 @@ def process_document(file_data, filename):
         "restrain property certificate", "initial contract of usufruct",
         "usufruct right certificate", "donation contract"  ]:
         extraction_prompt = TD_vlm_prompt
+    elif 'customer statement' in doc_type.lower():
+        doc_type='SOA'
     else:
         extraction_prompt = None
-
+    if doc_type in ("customer statement", "soa","SOA"):
+        
+        # Just return an empty extraction for these two types
+        result = {
+            "filename": filename,
+            "doc_type": 'soa',
+            "image_bytes": adjusted_image_bytes,
+            "extracted_data": {}
+        }
+        if filename.lower().endswith("pdf"):
+            result["original_pdf_bytes"] = original_pdf_bytes
+        return result
     if extraction_prompt and doc_type not in ['contract f','**contract f**','POA','poa']:
         if filename.lower().endswith("pdf"):
             zoom_factors = [1.75, 1, 0.75, 0.4]
@@ -714,18 +728,38 @@ def process_document(file_data, filename):
             }
             result["original_pdf_bytes"] = original_pdf_bytes
         return result
+#     elif doc_type in ['POA','poa']:
+#         doc_type = 'POA'
+#         file_data.seek(0)
+#         extracted_data = extract_data_from_pdf_pages_poa(file_data, LANGUAGE_PROMPT, POA_PROMPT_ENG, POA_PROMPT_ARABIC)
+#         if filename.lower().endswith("pdf"):
+#             result = {
+#                 "filename": filename,
+#                 "doc_type": doc_type,
+#                 "image_bytes": adjusted_image_bytes,
+#                 "extracted_data": extracted_data
+#             }
+#             result["original_pdf_bytes"] = original_pdf_bytes
+#         return result
     elif doc_type in ['POA','poa']:
         doc_type = 'POA'
+        # make sure we’re at the start of the stream
         file_data.seek(0)
-        extracted_data = extract_data_from_pdf_pages_poa(file_data, LANGUAGE_PROMPT, POA_PROMPT_ENG, POA_PROMPT_ARABIC)
-        if filename.lower().endswith("pdf"):
-            result = {
-                "filename": filename,
-                "doc_type": doc_type,
-                "image_bytes": adjusted_image_bytes,
-                "extracted_data": extracted_data
-            }
-            result["original_pdf_bytes"] = original_pdf_bytes
+        pdf_bytes = file_data.read()
+
+        # write to a temporary file so our extractor can read via path
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(pdf_bytes)
+            tmp.flush()
+            poa_json = extract_power_of_attorney(tmp.name, max_pages=4)
+
+        result = {
+            "filename": filename,
+            "doc_type": doc_type,
+            "image_bytes": adjusted_image_bytes,
+            "extracted_data": poa_json,
+            "original_pdf_bytes": pdf_bytes
+        }
         return result
     else:
         extracted_data = "{}"
@@ -740,7 +774,6 @@ def process_document(file_data, filename):
         result["original_pdf_bytes"] = original_pdf_bytes
     
     return result
-
 # ---------- STREAMLIT UI ----------
 # ---------- STREAMLIT UI ----------
 st.markdown("""
@@ -943,58 +976,107 @@ if "results" in st.session_state and st.session_state.results:
             js_pages = json.dumps(page_imgs)
             n_pages = len(page_imgs)
 
-            html = """
-            <div style="max-width:800px; margin:auto; border:1px solid #ccc; padding:8px;">
-              <img id="docImg" src="" style="width:100%; transform-origin:center center; transition: transform 0.2s;" />
-              <div style="text-align:center; margin-top:12px;">
-                <button id="prevBtn" style="
-                    background-color:#007bff;
-                    color:#fff;
-                    border:none;
-                    border-radius:4px;
-                    padding:6px 12px;
-                    margin-right:8px;
-                    cursor:pointer;
-                ">← Previous</button>
-                <span id="pageDisplay" style="font-weight:bold;">1/{n}</span>
-                <button id="nextBtn" style="
-                    background-color:#007bff;
-                    color:#fff;
-                    border:none;
-                    border-radius:4px;
-                    padding:6px 12px;
-                    margin-left:8px;
-                    cursor:pointer;
-                ">Next →</button>
-                <button id="rotateBtn" style="
-                    background-color:#6c757d;
-                    color:#fff;
-                    border:none;
-                    border-radius:4px;
-                    padding:6px 12px;
-                    margin-left:20px;
-                    cursor:pointer;
-                ">⟳ Rotate</button>
-              </div>
-            </div>
-            <script>
-            (function(){
-              const pages = """ + js_pages + """;
-              let idx = 0, rot = 0;
-              const imgEl = document.getElementById("docImg");
-              const pageEl = document.getElementById("pageDisplay");
-              document.getElementById("prevBtn").onclick = () => { if(idx>0) idx--; render(); };
-              document.getElementById("nextBtn").onclick = () => { if(idx<pages.length-1) idx++; render(); };
-              document.getElementById("rotateBtn").onclick = () => { rot = (rot + 90) % 360; render(); };
-              function render() {
-                imgEl.src = pages[idx];
-                imgEl.style.transform = `rotate(${rot}deg)`;
-                pageEl.textContent = (idx+1) + '/' + pages.length;
-              }
-              render();
-            })();
-            </script>
-            """.replace("{n}", str(n_pages))
+            html = f"""
+    <style>
+      .viewer-container {{
+        position: relative;
+        width:100%; max-width:800px;
+        height:1200px; margin:auto;
+        border:1px solid #ccc;
+      }}
+      #docImg {{
+        width:100%; height:100%;
+        object-fit:contain;
+        transform-origin: center center;
+        transition: transform 0.2s;
+        cursor: zoom-in;
+      }}
+      .controls {{
+        position: absolute; bottom:10px; left:50%;
+        transform: translateX(-50%);
+        background:rgba(255,255,255,0.9);
+        padding:8px; border-radius:6px;
+        display:flex; gap:6px; z-index:999;
+      }}
+      .controls button {{
+        padding:6px 10px; border:none;
+        border-radius:4px; cursor:pointer;
+      }}
+      .nav {{ background:#007bff; color:#fff; }}
+      .rotate {{ background:#6c757d; color:#fff; }}
+      .reset {{ background:#dc3545; color:#fff; }}
+    </style>
+
+    <div class="viewer-container">
+      <img id="docImg" src="" />
+      <div class="controls">
+        <button id="prevBtn" class="nav">← Prev</button>
+        <span id="pageDisplay">1/{n_pages}</span>
+        <button id="nextBtn" class="nav">Next →</button>
+        <button id="rotateBtn" class="rotate">⟳</button>
+        <button id="resetBtn" class="reset">Reset Zoom</button>
+      </div>
+    </div>
+
+    <script>
+    (function(){{
+      const pages = {js_pages};
+      let idx = 0, rot = 0, zoom = 1;
+      const img = document.getElementById("docImg");
+      const disp = document.getElementById("pageDisplay");
+
+      function render() {{
+        img.src = pages[idx];
+        img.style.transform = `scale(${{zoom}}) rotate(${{rot}}deg)`;
+        disp.textContent = `${{idx+1}}/{n}`;
+        img.style.cursor = zoom>1 ? 'zoom-out' : 'zoom-in';
+      }}
+
+      function resetZoom() {{
+        zoom = 1;
+        img.style.transformOrigin = 'center center';
+      }}
+      function setZoomAt(x, y) {{
+        resetZoom();
+        zoom = 2;
+        const rect = img.getBoundingClientRect();
+        const px = ((x - rect.left)/rect.width)*100;
+        const py = ((y - rect.top)/rect.height)*100;
+        img.style.transformOrigin = `${{px}}% ${{py}}%`;
+      }}
+
+      document.getElementById("prevBtn").onclick = function() {{
+        if(idx>0) idx--;
+        resetZoom();
+        render();
+      }};
+      document.getElementById("nextBtn").onclick = function() {{
+        if(idx<pages.length-1) idx++;
+        resetZoom();
+        render();
+      }};
+      document.getElementById("rotateBtn").onclick = function() {{
+        rot = (rot + 90)%360;
+        render();
+      }};
+      document.getElementById("resetBtn").onclick = function() {{
+        resetZoom();
+        render();
+      }};
+
+      img.addEventListener("click", function(e) {{
+        if(zoom===1) {{
+          setZoomAt(e.clientX, e.clientY);
+        }} else {{
+          resetZoom();
+        }}
+        render();
+      }});
+
+      render();
+    }})();
+    </script>
+    """
 
             # set height=1200 here
             components.html(html, height=1200, scrolling=False)
@@ -1004,22 +1086,16 @@ if "results" in st.session_state and st.session_state.results:
         with col_ocr:
             st.markdown("### Extracted Data")
             raw = current.get("extracted_data", "")
-#             st.write(raw)
             if "contract f" in current.get("doc_type","").lower():
-                # 1) Ensure raw→dict
                 if isinstance(raw, str):
                     try:
                         raw = json.loads(clean_json_string(raw))
                     except:
                         raw = {}
-
-                # 2) Preprocess pages to unwrap & clean raw_text
                 if isinstance(raw, dict):
                     pages = preprocess_pages(raw, clean_json_string)
-                    # 3) Now run your (page‑independent) unifier on `pages`
                     raw = unify_contract_f(pages, clean_json_string)
             elif "commercial license" in current.get("doc_type","").lower():
-#                 st.write(raw)
                 raw = unify_commercial_license(raw, clean_json_string)
             elif current.get("doc_type","").lower()=='title deed':
                 raw = unify_title_deed(raw, clean_json_string)
@@ -1033,6 +1109,11 @@ if "results" in st.session_state and st.session_state.results:
                 raw = unify_title_deed_lease_to_own(raw, clean_json_string)
             elif current.get("doc_type","").lower() in ['cheques'] :
                 raw = unify_cheques(raw, clean_json_string)
+            elif current.get("doc_type","").lower() =='noc non objection certificate' :
+                st.write(raw)
+                raw = unify_noc(raw, clean_json_string)
+                st.session_state.results[selected_index]["extracted_data"] = raw
+    
             extracted_raw = raw
 
             display_mode = "Form"
