@@ -1115,7 +1115,6 @@ if "results" in st.session_state and st.session_state.results:
             elif current.get("doc_type","").lower() in ['cheques'] :
                 raw = unify_cheques(raw, clean_json_string)
             elif current.get("doc_type","").lower() =='noc non objection certificate' :
-                st.write(raw)
                 raw = unify_noc(raw, clean_json_string)
                 st.session_state.results[selected_index]["extracted_data"] = raw
     
