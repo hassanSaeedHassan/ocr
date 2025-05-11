@@ -89,7 +89,11 @@ if not st.session_state.logged_in:
             if user:
                 st.session_state.logged_in = True
                 st.session_state.user      = user
-                st.experimental_rerun()
+                try:
+                    st.experimental_rerun()
+                except AttributeError:
+                    st.rerun()
+
             else:
                 st.error("Invalid credentials")
         if st.button("Sign up instead"):
@@ -571,7 +575,12 @@ if "results" in st.session_state and st.session_state.results:
                 # Reset the selection so we don't point at a missing index
                 st.session_state.current_index = 0
                 # Restart to refresh everything
-                st.experimental_rerun()
+                
+
+                try:
+                    st.experimental_rerun()
+                except AttributeError:
+                    st.rerun()
 
         else:
             st.warning("No preview available for this document.")
@@ -873,4 +882,8 @@ if st.button("🔄 Work on another appointment"):
     st.session_state.page = 1
 
     # 4) Rerun the app
-    st.experimental_rerun()
+    try:
+        st.experimental_rerun()
+    except AttributeError:
+        st.rerun()
+
