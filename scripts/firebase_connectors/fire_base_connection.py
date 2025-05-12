@@ -12,6 +12,7 @@ def init_db():
     Initialize Firebase Admin SDK and return a Firestore client.
     """
     firebase_config = st.secrets["firebase_service_account"]
+    cred = credentials.Certificate(firebase_config)
     try:
         # Check if a Firebase app is already initialized
         firebase_admin.get_app()
