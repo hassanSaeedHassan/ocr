@@ -3,6 +3,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 from datetime import datetime
 import pandas as pd
+import json # Import the json library
 
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
 @st.cache_resource
@@ -10,11 +11,15 @@ def init_db():
     """
     Initialize Firebase Admin SDK and return a Firestore client.
     """
-    cred = credentials.Certificate("injaz-ocr-firebase-adminsdk-fbsvc-4595d1dbfd.json")
+    firebase_config = st.secrets["firebase_service_account"]
     try:
+        # Check if a Firebase app is already initialized
         firebase_admin.get_app()
     except ValueError:
+        # If not initialized, initialize it with the credentials
         firebase_admin.initialize_app(cred)
+
+    # Return the Firestore client
     return firestore.client()
 
 # ─── AUTH HELPERS ───────────────────────────────────────────────────────
