@@ -11,7 +11,7 @@ import os
 @st.cache_resource
 def init_db():
     # Grab the AttrDict from Secrets
-    st.write(os.environ['firebase'])
+
     st.write(os.environ['type'])
     firebase_config = st.secrets["firebase"]
 
