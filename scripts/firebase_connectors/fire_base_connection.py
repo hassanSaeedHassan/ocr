@@ -1,53 +1,30 @@
-import streamlit as st
-import firebase_admin
-from firebase_admin import credentials, firestore
+import json
 from datetime import datetime
-import pandas as pd
-import json # Import the json library
 
-# ─── FIRESTORE INIT ────────────────────────────────────────────────────
+import pandas as pd
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
-# from datetime import datetime # Already imported, no need to repeat
-# import pandas as pd # Already imported, no need to repeat
-import json # Import the json library if not already imported
 
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
 @st.cache_resource
 def init_db():
-    """
-    Initialize Firebase Admin SDK and return a Firestore client.
-    """
-    # --- Load credentials from Streamlit secrets ---
-    # Access the dictionary-like object from st.secrets
-    firebase_config_attrdict = st.secrets["firebase_service_account"]
+    # Grab the AttrDict from Secrets
+    firebase_config = st.secrets["firebase"]
 
-    # Explicitly convert the AttrDict to a standard Python dictionary
-    firebase_config_dict = dict(firebase_config_attrdict)
+    # Turn into a plain dict
+    service_account_dict = {k: firebase_config[k] for k in firebase_config}
 
-    # If there are nested dictionaries in your secret, you might need
-    # a more robust conversion if the simple dict() cast isn't enough.
-    # However, for the service account structure, dict() should work.
-    # If you encounter issues with nested structures, you might need:
-    # import json
-    # firebase_config_dict = json.loads(json.dumps(firebase_config_attrdict))
+    # Initialize the credentials
+    cred = credentials.Certificate(service_account_dict)
 
-
-    # Initialize the credentials with the standard Python dictionary
-    cred = credentials.Certificate(firebase_config_dict)
-    # -----------------------------------------------
-
+    # Only initialize once
     try:
-        # Check if a Firebase app is already initialized
         firebase_admin.get_app()
     except ValueError:
-        # If not initialized, initialize it with the credentials
         firebase_admin.initialize_app(cred)
 
-    # Return the Firestore client
     return firestore.client()
-
 # ─── AUTH HELPERS ───────────────────────────────────────────────────────
 def login_user(db, email: str, pwd: str) -> dict | None:
     """
@@ -63,14 +40,16 @@ def login_user(db, email: str, pwd: str) -> dict | None:
         return doc.to_dict()
     return None
 
-def signup_user(db, email: str, pwd: str, username: str) -> tuple[bool,str|None]:
+
+def signup_user(db, email: str, pwd: str, username: str) -> tuple[bool, str | None]:
     """
-    Create a new user in auth collection. Return (True, None) on success,
-    or (False, message) if email exists.
+    Create a new user in auth collection.
+    Return (True, None) on success, or (False, message) if email exists.
     """
     existing = db.collection("auth").where("email", "==", email).get()
     if existing:
         return False, "Email already registered"
+
     db.collection("auth").add({
         "email": email,
         "password": pwd,
@@ -79,47 +58,39 @@ def signup_user(db, email: str, pwd: str, username: str) -> tuple[bool,str|None]
     })
     return True, None
 
-# ─── APPOINTMENT LOADER ─────────────────────────────────────────────────
-import streamlit as st
-import pandas as pd
-from datetime import datetime
 
+# ─── APPOINTMENT LOADER ─────────────────────────────────────────────────
 @st.cache_data
 def load_appointments(_db) -> pd.DataFrame:
     """
     Fetch only 'pending' appointments and return a DataFrame
     with Title-Cased column names, sorted by Create At.
     """
-    db = _db
     rows = []
-
-    # ─── only pending ────────────────────────────────
-    docs = db.collection("appointments") \
-             .where("status", "==", "pending") \
-             .stream()
+    docs = _db.collection("appointments") \
+              .where("status", "==", "pending") \
+              .stream()
 
     for doc in docs:
-        d = doc.to_dict()
-        d["id"] = doc.id
+        data = doc.to_dict()
+        data["id"] = doc.id
 
-        # convert Firestore timestamp
-        ts = d.get("createdAt")
-        if hasattr(ts, "ToDatetime"):
-            d["createdAt"] = ts.ToDatetime()
+        # convert Firestore timestamp to Python datetime
+        ts = data.get("createdAt")
+        if hasattr(ts, "to_datetime"):
+            data["createdAt"] = ts.to_datetime()
 
-        rows.append(d)
+        rows.append(data)
 
-    # ─── build dataframe ─────────────────────────────
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    # ─── coerce datetime & sort ──────────────────────
-    if "createdAt" in df.columns:
-        df["createdAt"] = pd.to_datetime(df["createdAt"])
-        df = df.sort_values("createdAt", ascending=True)
+    # Coerce and sort
+    df["createdAt"] = pd.to_datetime(df["createdAt"])
+    df = df.sort_values("createdAt", ascending=True)
 
-    # ─── rename columns to Title Case ────────────────
+    # Rename for display
     df = df.rename(columns={
         "id":                "ID",
         "clientType":        "Client Type",
@@ -139,5 +110,4 @@ def load_appointments(_db) -> pd.DataFrame:
         "countryCode":       "Country Code"
     })
 
-    # ─── reset index and return ──────────────────────
     return df.reset_index(drop=True)
