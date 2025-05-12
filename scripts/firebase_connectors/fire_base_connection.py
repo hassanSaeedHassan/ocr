@@ -5,11 +5,13 @@ import pandas as pd
 import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
+import os
 
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
 @st.cache_resource
 def init_db():
     # Grab the AttrDict from Secrets
+    st.write(os.environ)
     firebase_config = st.secrets["firebase"]
 
     # Turn into a plain dict
