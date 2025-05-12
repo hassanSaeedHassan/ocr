@@ -1,10 +1,10 @@
 import streamlit as st
 
-st.title("🔑 Secrets Debugger")
+st.title("🔍 Verify Streamlit Cloud Secrets")
 
 if st.button("Show all secrets"):
-    # List all top‑level keys
-    st.write("**Secret keys:**", list(st.secrets.keys()))
+    # Top-level sections, e.g. ["firebase"]
+    st.write("Secret namespaces:", list(st.secrets.keys()))
 
-    # Pretty‑print the entire secrets object (including nested tables)
+    # Full contents of each section
     st.json(st.secrets)
