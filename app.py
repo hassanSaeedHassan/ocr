@@ -5,7 +5,7 @@ st.title("🔒 Secrets Test")
 
 # List available secret sections
 try:
-    sections = list(st.secrets.keys())
+    sections = dict(st.secrets['firebase'])
     st.write("st.secrets sections:", sections)
 except Exception as e:
     st.error(f"No st.secrets: {e}")
