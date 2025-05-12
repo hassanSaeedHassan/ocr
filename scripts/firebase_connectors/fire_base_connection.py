@@ -6,13 +6,38 @@ import pandas as pd
 import json # Import the json library
 
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
+import streamlit as st
+import firebase_admin
+from firebase_admin import credentials, firestore
+# from datetime import datetime # Already imported, no need to repeat
+# import pandas as pd # Already imported, no need to repeat
+import json # Import the json library if not already imported
+
+# ─── FIRESTORE INIT ────────────────────────────────────────────────────
 @st.cache_resource
 def init_db():
     """
     Initialize Firebase Admin SDK and return a Firestore client.
     """
-    firebase_config = st.secrets["firebase_service_account"]
-    cred = credentials.Certificate(firebase_config)
+    # --- Load credentials from Streamlit secrets ---
+    # Access the dictionary-like object from st.secrets
+    firebase_config_attrdict = st.secrets["firebase_service_account"]
+
+    # Explicitly convert the AttrDict to a standard Python dictionary
+    firebase_config_dict = dict(firebase_config_attrdict)
+
+    # If there are nested dictionaries in your secret, you might need
+    # a more robust conversion if the simple dict() cast isn't enough.
+    # However, for the service account structure, dict() should work.
+    # If you encounter issues with nested structures, you might need:
+    # import json
+    # firebase_config_dict = json.loads(json.dumps(firebase_config_attrdict))
+
+
+    # Initialize the credentials with the standard Python dictionary
+    cred = credentials.Certificate(firebase_config_dict)
+    # -----------------------------------------------
+
     try:
         # Check if a Firebase app is already initialized
         firebase_admin.get_app()
