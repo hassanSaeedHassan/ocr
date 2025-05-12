@@ -1,10 +1,12 @@
 import streamlit as st
+from streamlit.runtime.secrets import StreamlitSecretNotFoundError
 
 st.title("🔍 Verify Streamlit Cloud Secrets")
 
-if st.button("Show all secrets"):
-    # Top-level sections, e.g. ["firebase"]
-    st.write("Secret namespaces:", list(st.secrets.keys()))
-
-    # Full contents of each section
+# Only run in deployed environment
+try:
+    keys = list(st.secrets.keys())
+    st.write("✅ Secrets loaded:", keys)
     st.json(st.secrets)
+except StreamlitSecretNotFoundError:
+    st.error("❌ No secrets found. Make sure you've saved them in App Settings → Secrets.")
