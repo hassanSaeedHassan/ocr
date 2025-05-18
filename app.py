@@ -229,23 +229,71 @@ else:
 
 
 if st.button("Submit") and uploaded_files:
-    st.session_state.results = []
-    overall_start_time = time.time()
+    # st.session_state.results = []
+    # overall_start_time = time.time()
     st.session_state.documents_saved = False
-    for uploaded_file in uploaded_files:
-        with st.spinner(f"Processing file: {uploaded_file.name}"):
+    # for uploaded_file in uploaded_files:
+    #     with st.spinner(f"Processing file: {uploaded_file.name}"):
+    #         try:
+    #             result = process_document(uploaded_file, uploaded_file.name)
+    #             if isinstance(result, list):
+    #                 st.session_state.results.extend(result)
+    #             else:
+    #                 st.session_state.results.append(result)
+    #         except Exception as e:
+    #             st.error(f"Error processing file {uploaded_file.name}: {e}")
+    # overall_end_time = time.time()
+    # st.session_state.current_index = 0
+    # st.success(f"Total processing time: {overall_end_time - overall_start_time:.2f} seconds")
+    # if st.button("Submit") and uploaded_files:
+    st.session_state.results = []
+    t0 = time.time()
+
+    for f in uploaded_files:
+        with st.spinner(f"Processing {f.name}…"):
             try:
-                result = process_document(uploaded_file, uploaded_file.name)
-                if isinstance(result, list):
-                    st.session_state.results.extend(result)
+                # first, try your normal PDF/image pipeline
+                res = process_document(f, f.name)
+
+            except RuntimeError as e:
+                msg = str(e)
+                if "source or target not a PDF" in msg:
+                    st.warning(f"{f.name} is not a PDF – converting image to PDF.")
+                    try:
+                        # rewind and read raw bytes
+                        f.seek(0)
+                        img = Image.open(f)
+                        if img.mode != "RGB":
+                            img = img.convert("RGB")
+
+                        # wrap in a one‐page PDF
+                        pdf_buf = io.BytesIO()
+                        img.save(pdf_buf, format="PDF")
+                        pdf_buf.name = f"{f.name.rsplit('.',1)[0]}.pdf"
+                        pdf_buf.seek(0)
+
+                        # re-run your same function on the PDF buffer
+                        res = process_document(pdf_buf, pdf_buf.name)
+
+                    except Exception as e2:
+                        st.error(f"Failed to convert/process {f.name}: {e2}")
+                        continue
+
                 else:
-                    st.session_state.results.append(result)
-            except Exception as e:
-                st.error(f"Error processing file {uploaded_file.name}: {e}")
-    overall_end_time = time.time()
+                    st.error(f"Error processing {f.name}: {e}")
+                    continue
+
+            # collect into results list
+            if isinstance(res, list):
+                st.session_state.results.extend(res)
+            else:
+                st.session_state.results.append(res)
+
     st.session_state.current_index = 0
-    st.success(f"Total processing time: {overall_end_time - overall_start_time:.2f} seconds")
-    
+    st.success(f"Processing complete in {time.time() - t0:.1f}s")
+
+
+
 
 
 if "results" in st.session_state and st.session_state.results:
