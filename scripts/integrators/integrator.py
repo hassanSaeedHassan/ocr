@@ -363,13 +363,14 @@ def build_deal_payload(
     selected_procedure: str,
     appt_date: str,     # e.g. "12-05-2025"
     time_slot: str,     # e.g. "08:15 AM"
+    booking_id:str,
     owner: dict,
     assigned_trustee: dict,
     token:str
 ) -> dict:
     # A) Booking Id
     auth_token = get_auth_token(token)
-    booking_id = next_booking_id(auth_token)
+    # booking_id = next_booking_id(auth_token)
 
     # B) Deal Name = full name of the first buyer
     buyer_rows = [r for r in person_roles if r.get("Role") == "buyer"]
