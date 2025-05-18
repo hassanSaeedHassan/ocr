@@ -788,6 +788,7 @@ if "results" in st.session_state and st.session_state.results:
         try:
             appt_date = row["Appointment Date"]  # e.g. "12-05-2025"
             time_slot = row["Time Slot"]         # e.g. "08:15 AM"
+            booking_id=row["bookingId"]
         except :
             appt_date=appt_date
             time_slot=time_slot
@@ -797,6 +798,7 @@ if "results" in st.session_state and st.session_state.results:
             selected_procedure,
             appt_date,
             time_slot,
+            booking_id,
             owner=st.session_state.selected_csr,
             assigned_trustee=st.session_state.selected_trustee,
             token=st.session_state.get("zoho_token")
