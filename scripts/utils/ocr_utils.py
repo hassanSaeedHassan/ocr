@@ -8,7 +8,8 @@ import os
 import json
 import zipfile
 from datetime import datetime
-from PIL import Image, ImageOps
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 from scripts.validation import *    
 from scripts.vlm_utils import *      
 from openai import OpenAI
@@ -23,29 +24,38 @@ import streamlit.components.v1 as components
 # ---------- SINGLE DOCUMENT PROCESSING FUNCTION ----------
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
 def process_document(file_data, filename):
-    if filename.lower().endswith("pdf"):
-        file_data.seek(0)
-        original_pdf_bytes = file_data.read()
-        file_data.seek(0)
-        data_uri, image_bytes = process_pdf_file(io.BytesIO(original_pdf_bytes))
-    elif filename.lower().endswith(("jpg", "jpeg")):
-        file_data.seek(0)
-        original_bytes = file_data.read()
-        image = Image.open(io.BytesIO(original_bytes))
-        image = ImageOps.exif_transpose(image)
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-        image = image.resize((1024, 1024))
-        buffer = io.BytesIO()
-        image.save(buffer, format="JPEG")
-        resized_bytes = buffer.getvalue()
-        encoded_image = base64.b64encode(resized_bytes).decode("utf-8")
-        data_uri = f"data:image/jpeg;base64,{encoded_image}"
-        image_bytes = resized_bytes
-        original_pdf_bytes = None
-    else:
-        data_uri, image_bytes = process_image_file(file_data)
-        original_pdf_bytes = None
+    # ─── ALWAYS CONVERT INPUT INTO A PDF ─────────────────────────────────
+
+    file_data.seek(0)
+    raw_bytes = file_data.read()
+
+    # default: assume it’s already a PDF
+    pdf_bytes = raw_bytes
+
+    if not filename.lower().endswith(".pdf"):
+        # try to open as image; on failure, keep pdf_bytes = raw_bytes
+        try:
+            img = Image.open(io.BytesIO(raw_bytes))
+            img = ImageOps.exif_transpose(img)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            # downsize if huge
+            img.thumbnail((2048, 2048), Image.LANCZOS)
+
+            pdf_buf = io.BytesIO()
+            img.save(pdf_buf, format="PDF")
+            pdf_bytes = pdf_buf.getvalue()
+            # ensure filename ends .pdf
+            filename = filename.rsplit(".", 1)[0] + ".pdf"
+
+        except UnidentifiedImageError:
+            # not an image → treat raw_bytes as PDF
+            pass
+
+    # now feed into your PDF pipeline
+    data_uri, image_bytes = process_pdf_file(io.BytesIO(pdf_bytes))
+    original_pdf_bytes = pdf_bytes
+
 
     if not filename.lower().endswith("pdf"):
         if len(image_bytes) > THRESHOLD_BYTES:
@@ -242,18 +252,27 @@ def process_document(file_data, filename):
             except Exception as e:
                 st.error(f"VLM extraction error: {e}")
                 extracted_data = "{}"
-    elif doc_type in ['contract f','**contract f**']:
+
+    elif doc_type in ['contract f', '**contract f**']:
+        # Normalize the doc type
         doc_type = 'contract f'
+
+        # Rewind and process every page
         file_data.seek(0)
         extracted_data = process_multipage_document(file_data, extraction_prompt)
-        if filename.lower().endswith("pdf"):
-            result = {
-                "filename": filename,
-                "doc_type": doc_type,
-                "image_bytes": adjusted_image_bytes,
-                "extracted_data": extracted_data
-            }
+
+        # Build and return the result dict unconditionally
+        result = {
+            "filename": filename,
+            "doc_type": doc_type,
+            "image_bytes": adjusted_image_bytes,
+            "extracted_data": extracted_data
+        }
+
+        # If we have original PDF bytes, include them too
+        if 'original_pdf_bytes' in locals() and original_pdf_bytes is not None:
             result["original_pdf_bytes"] = original_pdf_bytes
+
         return result
 
     elif doc_type in ['POA','poa']:
