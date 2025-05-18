@@ -423,26 +423,79 @@ if "results" in st.session_state and st.session_state.results:
     else:
         st.session_state.selected_csr = None
 
-    # ─── Trustee picker ─────────────────────────────────────────────────────
-    selected_trustee_name = st.selectbox(
-        "Assign Trustee Employee",
-        ["–– None ––"] + trustee_names,
-        key="trustee_selector"
-    )
-    trustee_obj = next(
-        (u for u in st.session_state.trustee_list if (u.get("full_name") or u.get("name")) == selected_trustee_name),
-        None
-    )
-    if trustee_obj:
-        st.session_state.selected_trustee = {
-            "id":        trustee_obj["id"],
-            "email":     trustee_obj.get("email"),
-            "full_name": trustee_obj.get("full_name"),
-            "name":      f"{trustee_obj.get('first_name','')} {trustee_obj.get('last_name','')}".strip()
-        }
-    else:
-        st.session_state.selected_trustee = None
+    # # ─── Trustee picker ─────────────────────────────────────────────────────
+    # selected_trustee_name = st.selectbox(
+    #     "Assign Trustee Employee",
+    #     ["–– None ––"] + trustee_names,
+    #     key="trustee_selector"
+    # )
+    # trustee_obj = next(
+    #     (u for u in st.session_state.trustee_list if (u.get("full_name") or u.get("name")) == selected_trustee_name),
+    #     None
+    # )
+    # if trustee_obj:
+    #     st.session_state.selected_trustee = {
+    #         "id":        trustee_obj["id"],
+    #         "email":     trustee_obj.get("email"),
+    #         "full_name": trustee_obj.get("full_name"),
+    #         "name":      f"{trustee_obj.get('first_name','')} {trustee_obj.get('last_name','')}".strip()
+    #     }
+    # else:
+    #     st.session_state.selected_trustee = None
 
+    # … after you compute trustee_names …
+    
+    staff_name = row.get("staffName", "").strip()
+    
+    # Try to find an exact match (case-insensitive)
+    match = None
+    for u in st.session_state.trustee_list:
+        name = (u.get("full_name") or u.get("name") or "").strip()
+        if name.lower() == staff_name.lower():
+            match = u
+            break
+    
+    if match:
+        # Build the dropdown options
+        options = ["–– None ––"] + trustee_names
+        idx = options.index(match.get("full_name") or match.get("name"))
+        # Render a disabled selectbox with the matched index
+        selected_trustee_name = st.selectbox(
+            "Assign Trustee Employee",
+            options,
+            index=idx,
+            disabled=True,
+            key="trustee_selector"
+        )
+        # Store the matched trustee object
+        st.session_state.selected_trustee = {
+            "id":        match["id"],
+            "email":     match.get("email"),
+            "full_name": match.get("full_name"),
+            "name":      f"{match.get('first_name','')} {match.get('last_name','')}".strip()
+        }
+    
+    else:
+        # No match → regular, editable selectbox
+        selected_trustee_name = st.selectbox(
+            "Assign Trustee Employee",
+            ["–– None ––"] + trustee_names,
+            key="trustee_selector"
+        )
+        trustee_obj = next(
+            (u for u in st.session_state.trustee_list
+             if (u.get("full_name") or u.get("name")) == selected_trustee_name),
+            None
+        )
+        if trustee_obj:
+            st.session_state.selected_trustee = {
+                "id":        trustee_obj["id"],
+                "email":     trustee_obj.get("email"),
+                "full_name": trustee_obj.get("full_name"),
+                "name":      f"{trustee_obj.get('first_name','')} {trustee_obj.get('last_name','')}".strip()
+            }
+        else:
+            st.session_state.selected_trustee = None
 
     st.markdown("### Document Review")
     options = []
