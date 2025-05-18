@@ -237,14 +237,16 @@ if mode == "Appointment":
 
     
     # add this (it’s optional – the user can skip it)
-    extra = st.file_uploader(
+    extra2 = st.file_uploader(
         "➕ Upload extra documents (optional)",
         type=["png","jpg","jpeg","pdf"],
-        accept_multiple_files=True
+        accept_multiple_files=True,
+        key="extra_docs"
+
     )
-    if extra:
+    if extra2:
         # merge their uploads with the ones from Firestore
-        uploaded_files.extend(extra)
+        uploaded_files.extend(extra2)
 
 else:
     st.header("📤 Manual Upload")
