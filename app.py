@@ -980,24 +980,43 @@ if "results" in st.session_state and st.session_state.results:
                             st.error(f"❌ Failed to upload `{file_name}`: {msg}")
                           
 
+# if st.button("🔄 Work on another appointment"):
+#     # 1) Clear out cached data so load_appointments re-runs
+#     st.cache_data.clear()  # flush all @st.cache_data caches :contentReference[oaicite:4]{index=4}
+
+#     # 2) Preserve only auth info
+#     keep = {"logged_in", "user", "zoho_token"}
+#     for key in list(st.session_state.keys()):
+#         if key not in keep:
+#             del st.session_state[key]
+
+#     # 3) Reset selection and pagination
+#     st.session_state.selected_name = None
+#     st.session_state.selected_pdfs = None
+#     st.session_state.page = 1
+
+#     # 4) Rerun the app
+#     try:
+#         st.experimental_rerun()
+#     except AttributeError:
+#         st.rerun()
 if st.button("🔄 Work on another appointment"):
-    # 1) Clear out cached data so load_appointments re-runs
-    st.cache_data.clear()  # flush all @st.cache_data caches :contentReference[oaicite:4]{index=4}
+    # 1) Remove exactly the bits we want reset
+    for key in [
+        "selected_name",
+        "selected_pdfs",
+        "results",
+        "current_index",
+        "selected_csr",
+        "selected_trustee",
+    ]:
+        st.session_state.pop(key, None)
 
-    # 2) Preserve only auth info
-    keep = {"logged_in", "user", "zoho_token"}
-    for key in list(st.session_state.keys()):
-        if key not in keep:
-            del st.session_state[key]
-
-    # 3) Reset selection and pagination
-    st.session_state.selected_name = None
-    st.session_state.selected_pdfs = None
+    # 2) Reset pagination
     st.session_state.page = 1
 
-    # 4) Rerun the app
+    # 3) Rerun from the top (now selected_name is gone)
     try:
         st.experimental_rerun()
     except AttributeError:
         st.rerun()
-
