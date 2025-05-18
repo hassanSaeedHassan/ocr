@@ -194,16 +194,34 @@ if mode == "Appointment":
 
 
     pdf_urls = row.get("Document URLs", [])
-    if not pdf_urls:
+    # pdf_urls = row.get("Document URLs", [])
+    uploaded_files = []
+    if pdf_urls:
+        # fetch from URLs as before
+        if st.session_state.selected_pdfs is None:
+            bufs = []
+            for i, url in enumerate(pdf_urls, 1):
+                r = requests.get(url); r.raise_for_status()
+                buf = io.BytesIO(r.content)
+                buf.name = f"{row['First Name']}_{row['Last Name']}_doc{i}.pdf"
+                bufs.append(buf)
+            st.session_state.selected_pdfs = bufs
+        uploaded_files = st.session_state.selected_pdfs
+    else:
         st.warning("No PDFs in this appointment.")
-        uploaded_files=[]
-        extra = st.file_uploader(
+    
+    # always allow extras
+    extra = st.file_uploader(
         "➕ Upload extra documents (optional)",
         type=["png","jpg","jpeg","pdf"],
-        accept_multiple_files=True)
-        if extra:
-            # merge their uploads with the ones from Firestore
-            uploaded_files.extend(extra)
+        accept_multiple_files=True
+    )
+    if extra:
+        uploaded_files.extend(extra)
+    
+    # if after merging we still have nothing, bail out
+    if not uploaded_files:
+        st.info("Please upload at least one document to proceed.")
         st.stop()
 
     if st.session_state.selected_pdfs is None:
