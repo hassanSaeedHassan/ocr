@@ -8,7 +8,7 @@ from firebase_admin import credentials, firestore
 import os
 
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
-@st.cache_resource
+# @st.cache_resource
 def init_db():
     # Grab the AttrDict from Secrets
     firebase_config = st.secrets["firebase"]
@@ -61,54 +61,52 @@ def signup_user(db, email: str, pwd: str, username: str) -> tuple[bool, str | No
 
 
 # ─── APPOINTMENT LOADER ─────────────────────────────────────────────────
-@st.cache_data
-def load_appointments(_db) -> pd.DataFrame:
+# @st.cache_data
+def load_appointments(db) -> pd.DataFrame:
     """
     Fetch only 'pending' appointments and return a DataFrame
     with Title-Cased column names, sorted by Create At.
+    (No caching, always fresh.)
     """
     rows = []
-    docs = _db.collection("appointments") \
-              .where("status", "==", "pending") \
-              .stream()
+    docs = db.collection("appointments") \
+             .where("status", "==", "pending") \
+             .stream()
 
     for doc in docs:
-        data = doc.to_dict()
-        data["id"] = doc.id
-
-        # convert Firestore timestamp to Python datetime
-        ts = data.get("createdAt")
-        if hasattr(ts, "to_datetime"):
-            data["createdAt"] = ts.to_datetime()
-
-        rows.append(data)
+        d = doc.to_dict()
+        d["id"] = doc.id
+        ts = d.get("createdAt")
+        if hasattr(ts, "ToDatetime"):
+            d["createdAt"] = ts.ToDatetime()
+        rows.append(d)
 
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    # Coerce and sort
-    df["createdAt"] = pd.to_datetime(df["createdAt"])
-    df = df.sort_values("createdAt", ascending=True)
+    if "createdAt" in df.columns:
+        df["createdAt"] = pd.to_datetime(df["createdAt"])
+        df = df.sort_values("createdAt", ascending=True)
 
-    # Rename for display
-    df = df.rename(columns={
-        "id":                "ID",
-        "clientType":        "Client Type",
-        "lastName":          "Last Name",
-        "firstName":         "First Name",
-        "appointmentType":   "Appointment Type",
-        "status":            "Status",
-        "appointmentDate":   "Appointment Date",
-        "marketingConsent":  "Marketing Consent",
-        "phone":             "Phone",
-        "certifyInfo":       "Certify Info",
-        "documentUrls":      "Document URLs",
-        "createdAt":         "Create At",
-        "email":             "Email",
-        "contractPassword":  "Contract Password",
-        "timeSlot":          "Time Slot",
-        "countryCode":       "Country Code"
-    })
-
-    return df.reset_index(drop=True)
+    return (
+        df.rename(columns={
+            "id": "ID",
+            "clientType": "Client Type",
+            "lastName": "Last Name",
+            "firstName": "First Name",
+            "appointmentType": "Appointment Type",
+            "status": "Status",
+            "appointmentDate": "Appointment Date",
+            "marketingConsent": "Marketing Consent",
+            "phone": "Phone",
+            "certifyInfo": "Certify Info",
+            "documentUrls": "Document URLs",
+            "createdAt": "Create At",
+            "email": "Email",
+            "contractPassword": "Contract Password",
+            "timeSlot": "Time Slot",
+            "countryCode": "Country Code"
+        })
+        .reset_index(drop=True)
+    )
