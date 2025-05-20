@@ -59,79 +59,56 @@ st.markdown("""
 
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
 
+# ─── Initialize Firestore & Session Defaults ───────────────────────────────
 db = init_db()
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in   = False
-    st.session_state.show_signup = False
+st.set_page_config(page_title="Injaz OCR System", layout="wide")
 
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+# ─── LOGIN SCREEN ──────────────────────────────────────────────────────────
 if not st.session_state.logged_in:
     st.title("🔒 Injaz OCR Login")
-    if st.session_state.show_signup:
-        email    = st.text_input("Email")
-        username = st.text_input("Username")
-        pwd1     = st.text_input("Password",         type="password")
-        pwd2     = st.text_input("Confirm Password", type="password")
-        if st.button("Create Account"):
-            if pwd1 != pwd2:
-                st.error("Passwords must match")
+
+    email = st.text_input("Email")
+    pwd   = st.text_input("Password", type="password")
+    if st.button("Login"):
+        user = login_user(db, email, pwd)
+        if user:
+            st.session_state.logged_in = True
+            st.session_state.user      = user
+
+            # load CSR list and auto-pick exactly as you had before…
+            rows = []
+            for doc in db.collection("auth").stream():
+                u = doc.to_dict()
+                if u.get("injaz_id"):
+                    rows.append({
+                        "injaz_id": u["injaz_id"],
+                        "email":    u["email"].strip().lower(),
+                        "full_name": u.get("full_name"),
+                        "name":     u.get("name"),
+                    })
+            st.session_state.csr_list = rows
+
+            logged_email = user["email"].strip().lower()
+            csr_obj = next((u for u in rows if u["email"] == logged_email), None)
+            if csr_obj:
+                st.session_state.selected_csr = {
+                    "id":        csr_obj["injaz_id"],
+                    "email":     csr_obj["email"],
+                    "full_name": csr_obj["full_name"],
+                    "name":      csr_obj["name"]
+                }
             else:
-                ok, msg = signup_user(db, email, pwd1, username)
-                if ok:
-                    st.success("Account created! Please log in.")
-                    st.session_state.show_signup = False
-                else:
-                    st.error(msg)
-        if st.button("← Back to Login"):
-            st.session_state.show_signup = False
-    else:
-        email = st.text_input("Email")
-        pwd   = st.text_input("Password", type="password")
-        if st.button("Login"):
-            user = login_user(db, email, pwd)
-            if user:
-                # ─── mark as logged in ───────────────────────────
-                st.session_state.logged_in = True
-                st.session_state.user      = user
+                st.error("⚠️ Your account email isn’t in the CSR list.")
 
-                # ─── load CSR list from your Firebase auth table ───
-                rows = []
-                for doc in db.collection("auth").stream():
-                    u = doc.to_dict()
-                    # only keep entries that have an injaz_id
-                    if u.get("injaz_id"):
-                        rows.append({
-                            "injaz_id":  u["injaz_id"],
-                            "email":     u["email"].strip().lower(),
-                            "full_name": u.get("full_name"),
-                            "name":      u.get("name")
-                        })
-                st.session_state.csr_list = rows
-
-                # ─── auto-pick the logged-in CSR by email ─────────
-                logged_email = user["email"].strip().lower()
-                csr_obj = next((u for u in rows if u["email"] == logged_email), None)
-                if csr_obj:
-                    st.session_state.selected_csr = {
-                        "id":        csr_obj["injaz_id"],
-                        "email":     csr_obj["email"],
-                        "full_name": csr_obj["full_name"],
-                        "name":      csr_obj["name"]
-                    }
-                else:
-                    st.error("⚠️ Your account email isn’t in the CSR list.")
-
-                # ─── finally, restart the app with new session state ──
-                try:
-                    st.experimental_rerun()
-                except AttributeError:
-                    st.rerun()
-            else:
-                st.error("Invalid credentials")
-
-        if st.button("Sign up instead"):
-            st.session_state.show_signup = True
+            st.experimental_rerun()
+        else:
+            st.error("Invalid credentials")
 
     st.stop()
+
 
 # ---------- STREAMLIT UI ----------
 if "zoho_token" not in st.session_state:
@@ -759,129 +736,6 @@ if "results" in st.session_state and st.session_state.results:
             if display_mode == "Form":
                 render_data_form(extracted_raw, selected_index)
 final_roles = st.session_state.get("person_roles", [])
-
-# # now you can use `final_roles` however you need:
-# # e.g., print it out, send to Firestore, pass it to another function, etc.
-# # st.write("🚀 Final person roles:", final_roles,selected_procedure)
-# # for i, doc in enumerate(st.session_state.results, start=1):
-# #         dt = doc.get("doc_type", "document").lower().strip()
-# #         if 'contract f' in dt:
-# #             raw=doc.get("extracted_data", "")
-# #             st.write(unify_contract_f(raw)['Property Financial Information']["Sell Price"].replace('AED',''))
-# if "results" in st.session_state and st.session_state.results:
-#     # 1) Build the Zoho payload and display it
-#     appt_date = row["appointmentDate"]   # e.g. "12-05-2025"
-#     time_slot = row["timeSlot"]          # e.g. "08:15 AM"
-
-#     payload = build_deal_payload(
-#         st.session_state.results,
-#         st.session_state.person_roles,
-#         selected_procedure,
-#         appt_date,
-#         time_slot,
-#         owner=st.session_state.selected_csr,
-#         assigned_trustee=st.session_state.selected_trustee,
-#         token=st.session_state.get("zoho_token")
-#     )
-#     st.markdown("### Zoho Payload")
-#     st.write(payload)
-#     st.write(st.session_state.get("zoho_token"))
-#     # 2) Post the Deal to Zoho
-#     posted  = post_booking(st.session_state.get("zoho_token"), payload)
-#     st.write("Deal posted successfully?" , posted,3)
-
-#     if not posted:
-#         st.error("❌ Failed to create Deal in Zoho. Check logs for details.")
-#     else:
-#         # 3) Retrieve Zoho’s internal deal ID by Booking_Id
-#         time.sleep(20)
-#         booking_id = payload["data"][0]["Booking_Id"]
-
-#         # ─── Ensure our token is fresh once up front ─────────────────────────
-#         token = get_auth_token(st.session_state.get("zoho_token"))
-#         st.session_state["zoho_token"] = token
-
-#         deal_id = get_deal_id_by_booking_id(token, booking_id)
-#         if not deal_id:
-#             st.error(f"❌ Could not find Deal for Booking_Id={booking_id}")
-#         else:
-#             st.success(f"✅ Zoho Deal ID: {deal_id}")
-
-#             # 4) Upload each renamed document as an attachment
-#             with st.spinner("Uploading attachments to Zoho..."):
-#                 for idx, doc in enumerate(st.session_state.results, start=1):
-#                     dt = doc.get("doc_type", "document").lower().strip()
-
-#                     # Build a human-readable label
-#                     if dt in ["ids", "passport", "residence visa"]:
-#                         raw = doc.get("extracted_data", "")
-#                         if isinstance(raw, str):
-#                             try:
-#                                 data = json.loads(raw)
-#                             except:
-#                                 data = {"raw_text": raw}
-#                         else:
-#                             data = raw
-#                         if "raw_text" in data and isinstance(data["raw_text"], str):
-#                             try:
-#                                 data = json.loads(clean_json_string(data["raw_text"]))
-#                             except:
-#                                 pass
-
-#                         if dt == "ids":
-#                             person = data.get("front", {}).get("name_english", "").strip()
-#                         elif dt == "passport":
-#                             person = data.get("fullname", "").strip()
-#                         else:
-#                             person = (data.get("full_name") or data.get("arabic_name") or "").strip()
-
-#                         role = next(
-#                             (r["Role"] for r in st.session_state.person_roles if r["Name"] == person),
-#                             None
-#                         )
-#                         if role:
-#                             label = f"{idx}.{role} {dt} — {person}"
-#                         else:
-#                             label = f"{idx}.{dt} — {person}"
-#                     else:
-#                         label = f"{idx}.{dt}"
-
-#                     # Sanitize into a filename and append .pdf
-#                     base_name = label.replace(" ", "_").replace("/", "_")
-#                     file_name = f"{base_name}.pdf"
-
-#                     # Grab the PDF bytes
-#                     file_bytes = doc.get("pdf_bytes") or doc.get("original_pdf_bytes")
-#                     if not file_bytes:
-#                         st.warning(f"No PDF content for {file_name}, skipping.")
-#                         continue
-
-#                     # First upload attempt
-#                     ok, msg = upload_attachment_to_deal(
-#                         auth_token   = token,
-#                         deal_id      = deal_id,
-#                         file_name    = file_name,
-#                         file_content = file_bytes,
-#                         content_type = "application/pdf"
-#                     )
-
-#                     # If we get a 401, refresh the token once and retry
-#                     if not ok and "401" in msg:
-#                         token = get_auth_token(token)
-#                         st.session_state["zoho_token"] = token
-#                         ok, msg = upload_attachment_to_deal(
-#                             auth_token   = token,
-#                             deal_id      = deal_id,
-#                             file_name    = file_name,
-#                             file_content = file_bytes,
-#                             content_type = "application/pdf"
-#                         )
-
-#                     if ok:
-#                         st.write(f"✅ Uploaded `{file_name}` → {msg}")
-#                     else:
-#                         st.error(f"❌ Failed to upload `{file_name}`: {msg}")
-
 if "results" in st.session_state and st.session_state.results:
     st.markdown("### Ready to send to Zoho CRM")
     if st.button("Submit to Zoho"):
@@ -1016,27 +870,6 @@ if "results" in st.session_state and st.session_state.results:
                         else:
                             st.error(f"❌ Failed to upload `{file_name}`: {msg}")
                           
-
-# if st.button("🔄 Work on another appointment"):
-#     # 1) Clear out cached data so load_appointments re-runs
-#     st.cache_data.clear()  # flush all @st.cache_data caches :contentReference[oaicite:4]{index=4}
-
-#     # 2) Preserve only auth info
-#     keep = {"logged_in", "user", "zoho_token"}
-#     for key in list(st.session_state.keys()):
-#         if key not in keep:
-#             del st.session_state[key]
-
-#     # 3) Reset selection and pagination
-#     st.session_state.selected_name = None
-#     st.session_state.selected_pdfs = None
-#     st.session_state.page = 1
-
-#     # 4) Rerun the app
-#     try:
-#         st.experimental_rerun()
-#     except AttributeError:
-#         st.rerun()
 if st.button("🔄 Work on another appointment"):
     # 1) Remove exactly the bits we want reset
     for key in [
