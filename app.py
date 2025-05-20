@@ -61,7 +61,6 @@ THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
 
 # ─── Initialize Firestore & Session Defaults ───────────────────────────────
 db = init_db()
-st.set_page_config(page_title="Injaz OCR System", layout="wide")
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
