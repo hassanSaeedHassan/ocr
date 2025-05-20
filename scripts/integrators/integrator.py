@@ -454,28 +454,25 @@ def build_deal_payload(
     selected_procedure: str,
     appt_date: str,     # "12-05-2025"
     time_slot: str,     # "08:15 AM"
-    booking_id:str,
+    booking_id: str,
     owner: dict,
     assigned_trustee: dict,
-    token:str
+    token: str
 ) -> dict:
     auth_token = get_auth_token(token)
-    # booking_id = next_booking_id(auth_token)
 
-    # 1) Build Buyer & Seller details as before
+    # Helper: build the name/POA entries without the contact block yet
     def build_party_details(main_role, poa_role, prefix):
         mains = [r for r in person_roles if r["Role"] == main_role]
         poas  = [r for r in person_roles if r["Role"] == poa_role]
         details = []
-
         for m in mains:
-            name_parts = m["Name"].split()
-            first, last = name_parts[0], name_parts[-1]
+            first, last = m["Name"].split()[0], m["Name"].split()[-1]
             entry = {
-                f"{prefix}_First_Name":        first,
-                f"{prefix}_Last_Name":         last,
-                f"{prefix}_POA_First_Name":    "",
-                f"{prefix}_POA_Last_Name":     "",
+                f"{prefix}_First_Name":     first,
+                f"{prefix}_Last_Name":      last,
+                f"{prefix}_POA_First_Name": "",
+                f"{prefix}_POA_Last_Name":  "",
                 f"Is_{prefix.lower()}_Individual_Company": "Individual",
             }
             if poas:
@@ -485,17 +482,16 @@ def build_deal_payload(
             details.append(entry)
         return details
 
-    buyer_details  = build_party_details("buyer", "poa_buyer",  "Buyer")
+    # 1) Build the “bare” detail entries
+    buyer_details  = build_party_details("buyer", "poa_buyer",   "Buyer")
     seller_details = build_party_details("seller","poa_seller", "Seller")
 
-    # 2) Create a Contact for **each** buyer and seller, capture their Zoho IDs
+    # 2) Create contacts and collect their Zoho IDs
     buyer_contacts = []
     for b in [r for r in person_roles if r["Role"] == "buyer"]:
         fn, ln = b["Name"].split()[0], b["Name"].split()[-1]
-        contact = create_contact(
-            auth_token=auth_token,
-            first_name=fn,
-            last_name=ln,
+        resp = create_contact(
+            auth_token, fn, ln,
             email=b.get("Email",""),
             phone=b.get("Phone",""),
             billing_phone=b.get("Phone",""),
@@ -503,20 +499,18 @@ def build_deal_payload(
             created_by=owner,
             lead_source="Zoho Bookings"
         )
-        data = contact["data"][0]["details"]
+        details = resp["data"][0]["details"]
         buyer_contacts.append({
-            "module": "Contacts",
-            "name":   f"{fn} {ln}",
-            "id":     data["id"]
+            "module":  "Contacts",
+            "name":    f"{fn} {ln}",
+            "id":      details["id"]
         })
 
     seller_contacts = []
     for s in [r for r in person_roles if r["Role"] == "seller"]:
         fn, ln = s["Name"].split()[0], s["Name"].split()[-1]
-        contact = create_contact(
-            auth_token=auth_token,
-            first_name=fn,
-            last_name=ln,
+        resp = create_contact(
+            auth_token, fn, ln,
             email=s.get("Email",""),
             phone=s.get("Phone",""),
             billing_phone=s.get("Phone",""),
@@ -524,45 +518,57 @@ def build_deal_payload(
             created_by=owner,
             lead_source="Zoho Bookings"
         )
-        data = contact["data"][0]["details"]
+        details = resp["data"][0]["details"]
         seller_contacts.append({
-            "module": "Contacts",
-            "name":   f"{fn} {ln}",
-            "id":     data["id"]
+            "module":  "Contacts",
+            "name":    f"{fn} {ln}",
+            "id":      details["id"]
         })
 
-    # 3) Pricing logic as before
+    # 3) Merge each detail entry with its matching contact
+    #    (assumes the same order in details & contacts lists)
+    for i, entry in enumerate(buyer_details):
+        entry["Buyer_contact"] = buyer_contacts[i]
+    for i, entry in enumerate(seller_details):
+        entry["Seller_Contact"] = seller_contacts[i]
+
+    # 4) Extract price (as before)
     price = None
     for d in results:
-        if "contract f" in d.get("doc_type","").lower():
+        if "contract f" in d.get("doc_type", "").lower():
             unified = unify_contract_f(d["extracted_data"])
-            price = unified["Property Financial Information"]["Sell Price"] \
-                        .replace("AED","").replace(",","").strip()
+            price = (
+                unified["Property Financial Information"]["Sell Price"]
+                .replace("AED","")
+                .replace(",","")
+                .strip()
+            )
             break
 
-    # 4) Format date
+    # 5) Format the appointment date to ISO
     dt = datetime.strptime(appt_date, "%d-%m-%Y")
     iso_date = dt.strftime("%Y-%m-%d")
 
-    # 5) Assemble the deal record, injecting the first buyer/seller contact blocks
+    # 6) Assemble the final Zoho payload
     record = {
-        "Deal_Name":            person_roles[0]["Name"],  # or however you name it
-        "Booking_Id":           booking_id,
-        "Appointment_Status":   "Verification Pending",
-        "Date":                 iso_date,
-        "Time":                 time_slot,
-        "Buyer_Details1":       buyer_details,
-        "Seller_Details1":      seller_details,
-        "Buyer_contact":        buyer_contacts[0] if buyer_contacts else {},
-        "Seller_Contact":       seller_contacts[0] if seller_contacts else {},
+        "Deal_Name":           person_roles[0]["Name"],
+        "Booking_Id":          booking_id,
+        "Appointment_Status":  "Verification Pending",
+        "Date":                iso_date,
+        "Time":                time_slot,
+        "Buyer_Details1":      buyer_details,
+        "Seller_Details1":     seller_details,
+        # Note: top‐level blocks no longer needed, because now they're inside details:
+        "Buyer_contact":       buyer_contacts[0],
+        "Seller_Contact":      seller_contacts[0],
         **({"Owner": owner} if owner else {}),
         **({"Assigned_CSR": {"module":"Users","name":owner["name"],"id":owner["id"]}} if owner else {}),
         **({"Assigned_trustee": assigned_trustee} if assigned_trustee else {}),
-        "Stage":                "Document Verification pending from CSR",
-        "Individual_Company":   "Individual",
-        "Procedure_Type":       selected_procedure,
-        "Selling_Price":        float(price) if price else None,
-        "Lead_Source":          "Booking Form"
+        "Stage":               "Document Verification pending from CSR",
+        "Individual_Company":  "Individual",
+        "Procedure_Type":      selected_procedure,
+        "Selling_Price":       float(price) if price else None,
+        "Lead_Source":         "Booking Form"
     }
 
     return {"data": [record]}
