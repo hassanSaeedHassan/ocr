@@ -7,15 +7,20 @@ import pandas as pd
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
 
 def init_db():
-    fb_creds = st.secrets["firebase"]
-    # Turn literal “\n” into actual newlines:
+    # Copy secrets into a mutable dict
+    fb_raw   = st.secrets["firebase"]
+    fb_creds = fb_raw.to_dict()                           
+
+    # Convert escaped "\n" into real newlines (PEM format)
     fb_creds["private_key"] = fb_creds["private_key"].replace("\\n", "\n")
 
+    # Initialize Firebase
     cred = credentials.Certificate(fb_creds)
     try:
         firebase_admin.get_app()
     except ValueError:
         firebase_admin.initialize_app(cred)
+
     return firestore.client()
 # ─── AUTH HELPERS ───────────────────────────────────────────────────────
 def login_user(db, email: str, pwd: str) -> dict | None:
