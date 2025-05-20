@@ -448,14 +448,6 @@ def build_deal_payload_old(
     return {"data": [record]}
 
 
-
-
-
-    booking_id:str,
-    owner: dict,
-    assigned_trustee: dict,
-    token:str
-
 def build_deal_payload(
     results: list,
     person_roles: list,
