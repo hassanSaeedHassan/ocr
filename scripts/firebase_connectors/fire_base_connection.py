@@ -6,19 +6,14 @@ import pandas as pd
 
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
 # @st.cache_resource
+@st.cache_resource
 def init_db():
-    # Grab the entire [firebase] table from .streamlit/secrets.toml
-    firebase_creds: dict = st.secrets["firebase"]
-
-    # Initialize a Certificate directly from that dict
-    cred = credentials.Certificate(firebase_creds)
-
+    fb_creds = st.secrets["firebase"]              # dict from TOML
+    cred = credentials.Certificate(fb_creds)        # accepts a dict :contentReference[oaicite:5]{index=5}
     try:
-        # If already initialized, this will simply return the existing app
         firebase_admin.get_app()
     except ValueError:
         firebase_admin.initialize_app(cred)
-
     return firestore.client()
 # ─── AUTH HELPERS ───────────────────────────────────────────────────────
 def login_user(db, email: str, pwd: str) -> dict | None:
