@@ -60,6 +60,65 @@ def post_booking(auth_token: str, booking_payload: Dict) -> bool:
     # 4) Check body for success
     return bool(resp.json().get('data'))
 
+def create_contact(auth_token: str,
+                   first_name: str,
+                   last_name: str,
+                   email: str,
+                   phone: str,
+                   billing_phone: str,
+                   owner: dict,
+                   created_by: dict,
+                   lead_source: str = "Zoho Bookings"
+                  ) -> dict:
+    """
+    Creates a Contact in Zoho CRM and returns the API response JSON.
+    """
+    # make sure your ENDPOINTS dict includes:
+    ZOHO_API_BASE = "https://crm.zoho.com/crm/v2.2"
+    ENDPOINTS = {
+        # ... other modules ...
+        "contacts": f"{ZOHO_API_BASE}/Contacts",
+    }
+    url = ENDPOINTS["contacts"]
+    record = {
+        "First_Name":     first_name,
+        "Last_Name":      last_name,
+        "Full_Name":      f"{first_name} {last_name}",
+        "Email":          email,
+        "Phone":          phone,
+        "Billing_Phone":  billing_phone,
+        "Owner":          owner,
+        "Created_By":     created_by,
+        "Lead_Source":    lead_source
+    }
+    payload = {"data": [record]}
+
+    def _call(token: str):
+        return retry_on_exception(
+            lambda: requests.post(
+                url,
+                headers={
+                    "Authorization": f"Zoho-oauthtoken {token}",
+                    "Content-Type":  "application/json"
+                },
+                json=payload,
+                timeout=10
+            ),
+            retries=3
+        )
+
+    # 1) initial attempt
+    resp = _call(auth_token)
+
+    # 2) 401→refresh
+    if resp.status_code == 401:
+        auth_token = get_auth_token(auth_token)
+        resp = _call(auth_token)
+
+    # 3) raise on error
+    resp.raise_for_status()
+
+    return resp.json()
 
 ### 3) Search for a deal by Booking_Id, with retries & 401 refresh ###
 def get_deal_id_by_booking_id(auth_token: str, booking_id: str) -> str | None:
@@ -277,87 +336,10 @@ def next_booking_id(access_token: str) -> str:
     next_num = int(num) + 1
     return f"{prefix}-{next_num:05d}"
 
+
+
+
 def build_deal_payload_old(
-    results: list,
-    person_roles: list,
-    selected_procedure: str,
-    appt_date: str,
-    time_slot: str
-) -> dict:
-    """
-    Assemble the final payload dict to send to Zoho.
-    """
-    # A) Booking Id
-    auth_token = get_auth_token()
-    
-#     token, api_domain = fetch_zoho_access_token()
-    booking_id = next_booking_id(auth_token)
-
-    # B) Deal Name = full name of the first buyer
-    buyer_rows = [r for r in person_roles if r.get("Role") == "buyer"]
-    deal_name = buyer_rows[0]["Name"] if buyer_rows else ""
-
-    # C) Selling price from Contract F
-    price = None
-    for d in results:
-        if "contract f" in d.get("doc_type", "").lower():
-            unified = unify_contract_f(d["extracted_data"])
-            price = unified["Property Financial Information"]["Sell Price"].replace("AED", "").strip()
-            break
-
-    # D) Build Buyer_Details1 & Seller_Details1
-    def build_party_details(main_role, poa_role, prefix):
-        # 1) extract main and POA rows
-        mains = [r for r in person_roles if r["Role"] == main_role]
-        poas  = [r for r in person_roles if r["Role"] == poa_role]
-
-        details = []
-        for m in mains:
-            name_parts = m["Name"].split()
-            entry = {
-                f"{prefix}_First_Name":          name_parts[0] if name_parts else "",
-                f"{prefix}_Last_Name":           name_parts[-1] if name_parts else "",
-                f"{prefix}_POA_First_Name":      "",
-                f"{prefix}_POA_Last_Name":       "",
-                f"Is_{prefix.lower()}_Individual_Company": "Individual",
-            }
-            # 2) if there's a corresponding POA, merge its name here
-            if poas:
-                poa_parts = poas[0]["Name"].split()
-                entry[f"{prefix}_POA_First_Name"] = poa_parts[0] if poa_parts else ""
-                entry[f"{prefix}_POA_Last_Name"]  = poa_parts[-1] if poa_parts else ""
-            details.append(entry)
-
-        return details
-
-    buyer_details  = build_party_details("buyer",     "poa_buyer",  "Buyer")
-    seller_details = build_party_details("seller",    "poa_seller", "Seller")
-
-
-
-    return {
-        "data": [
-            {
-                "Deal_Name":               deal_name,
-                "Booking_Id":              booking_id,
-                "Appointment_Status":      "Verification Pending",
-                "Date":                    appt_date,    
-                "Time":                    time_slot,    
-                "Buyer_Details1":          buyer_details,
-                "Stage":                   "Document Verification pending from CSR",
-                "Individual_Company":      "Individual",
-                "Procedure_Type":          selected_procedure,
-                "Selling_Price":           price if price else None,
-                "Lead_Source":             "Booking Form",
-                "Seller_Details1":         seller_details
-            }
-        ]
-    }
-
-
-
-
-def build_deal_payload(
     results: list,
     person_roles: list,
     selected_procedure: str,
@@ -456,6 +438,134 @@ def build_deal_payload(
         **({"Assigned_trustee": trustee_block} if trustee_block else {}),
         "Buyer_Details1":       buyer_details,
         "Seller_Details1":      seller_details,
+        "Stage":                "Document Verification pending from CSR",
+        "Individual_Company":   "Individual",
+        "Procedure_Type":       selected_procedure,
+        "Selling_Price":        float(price) if price else None,
+        "Lead_Source":          "Booking Form"
+    }
+
+    return {"data": [record]}
+
+
+
+
+
+    booking_id:str,
+    owner: dict,
+    assigned_trustee: dict,
+    token:str
+
+def build_deal_payload(
+    results: list,
+    person_roles: list,
+    selected_procedure: str,
+    appt_date: str,     # "12-05-2025"
+    time_slot: str,     # "08:15 AM"
+    booking_id:str,
+    owner: dict,
+    assigned_trustee: dict,
+    token:str
+) -> dict:
+    auth_token = get_auth_token(token)
+    # booking_id = next_booking_id(auth_token)
+
+    # 1) Build Buyer & Seller details as before
+    def build_party_details(main_role, poa_role, prefix):
+        mains = [r for r in person_roles if r["Role"] == main_role]
+        poas  = [r for r in person_roles if r["Role"] == poa_role]
+        details = []
+
+        for m in mains:
+            name_parts = m["Name"].split()
+            first, last = name_parts[0], name_parts[-1]
+            entry = {
+                f"{prefix}_First_Name":        first,
+                f"{prefix}_Last_Name":         last,
+                f"{prefix}_POA_First_Name":    "",
+                f"{prefix}_POA_Last_Name":     "",
+                f"Is_{prefix.lower()}_Individual_Company": "Individual",
+            }
+            if poas:
+                pp = poas[0]["Name"].split()
+                entry[f"{prefix}_POA_First_Name"] = pp[0]
+                entry[f"{prefix}_POA_Last_Name"]  = pp[-1]
+            details.append(entry)
+        return details
+
+    buyer_details  = build_party_details("buyer", "poa_buyer",  "Buyer")
+    seller_details = build_party_details("seller","poa_seller", "Seller")
+
+    # 2) Create a Contact for **each** buyer and seller, capture their Zoho IDs
+    buyer_contacts = []
+    for b in [r for r in person_roles if r["Role"] == "buyer"]:
+        fn, ln = b["Name"].split()[0], b["Name"].split()[-1]
+        contact = create_contact(
+            auth_token=auth_token,
+            first_name=fn,
+            last_name=ln,
+            email=b.get("Email",""),
+            phone=b.get("Phone",""),
+            billing_phone=b.get("Phone",""),
+            owner=owner,
+            created_by=owner,
+            lead_source="Zoho Bookings"
+        )
+        data = contact["data"][0]["details"]
+        buyer_contacts.append({
+            "module": "Contacts",
+            "name":   f"{fn} {ln}",
+            "id":     data["id"]
+        })
+
+    seller_contacts = []
+    for s in [r for r in person_roles if r["Role"] == "seller"]:
+        fn, ln = s["Name"].split()[0], s["Name"].split()[-1]
+        contact = create_contact(
+            auth_token=auth_token,
+            first_name=fn,
+            last_name=ln,
+            email=s.get("Email",""),
+            phone=s.get("Phone",""),
+            billing_phone=s.get("Phone",""),
+            owner=owner,
+            created_by=owner,
+            lead_source="Zoho Bookings"
+        )
+        data = contact["data"][0]["details"]
+        seller_contacts.append({
+            "module": "Contacts",
+            "name":   f"{fn} {ln}",
+            "id":     data["id"]
+        })
+
+    # 3) Pricing logic as before
+    price = None
+    for d in results:
+        if "contract f" in d.get("doc_type","").lower():
+            unified = unify_contract_f(d["extracted_data"])
+            price = unified["Property Financial Information"]["Sell Price"] \
+                        .replace("AED","").replace(",","").strip()
+            break
+
+    # 4) Format date
+    dt = datetime.strptime(appt_date, "%d-%m-%Y")
+    iso_date = dt.strftime("%Y-%m-%d")
+
+    # 5) Assemble the deal record, injecting the first buyer/seller contact blocks
+    record = {
+        "Deal_Name":            person_roles[0]["Name"],  # or however you name it
+        "Booking_Id":           booking_id,
+        "Appointment_Status":   "Verification Pending",
+        "Date":                 iso_date,
+        "Time":                 time_slot,
+        "Buyer_Details1":       buyer_details,
+        "Seller_Details1":      seller_details,
+        "Buyer_contact":        buyer_contacts[0] if buyer_contacts else {},
+        "Seller_Contact":       seller_contacts[0] if seller_contacts else {},
+        **({"Owner": owner} if owner else {}),
+        **({"Assigned_CSR": {"module":"Users","name":owner["name"],"id":owner["id"]}} if owner else {}),
+        **({"Assigned_trustee": assigned_trustee} if assigned_trustee else {}),
         "Stage":                "Document Verification pending from CSR",
         "Individual_Company":   "Individual",
         "Procedure_Type":       selected_procedure,
