@@ -172,7 +172,7 @@ st.session_state.setdefault("page", 1)
 st.session_state.setdefault("selected_name", None)
 st.session_state.setdefault("selected_pdfs", None)
 
-mode = st.radio("Source documents from:", ["Appointment", "Manual Upload"])
+mode = "Appointment"
 uploaded_files = []
 
 if mode == "Appointment":
@@ -253,43 +253,11 @@ if mode == "Appointment":
     if extra:
         uploaded_files.extend(extra)
 
-else:
-    st.header("📤 Manual Upload")
-    files = st.file_uploader("Upload files", type=["png","jpg","jpeg","pdf"], accept_multiple_files=True)
-    if files:
-        uploaded_files = files
 
-    # Ask for date input
-    appt_date = st.date_input("Select Appointment Date", min_value=date.today())
-
-    # Format the date for display or submission
-    appt_date = appt_date.strftime('%d-%m-%Y')
-
-    # Create time slots from 08:00 AM to 04:00 PM in 15 min intervals
-    base_time = datetime.strptime("08:00 AM", "%I:%M %p")
-    time_slots = [(base_time + timedelta(minutes=15 * i)).strftime("%I:%M %p") for i in range(33)]
-
-    time_slot = st.selectbox("Select Time Slot", time_slots)
 
 
 if st.button("Submit") and uploaded_files:
-    # st.session_state.results = []
-    # overall_start_time = time.time()
     st.session_state.documents_saved = False
-    # for uploaded_file in uploaded_files:
-    #     with st.spinner(f"Processing file: {uploaded_file.name}"):
-    #         try:
-    #             result = process_document(uploaded_file, uploaded_file.name)
-    #             if isinstance(result, list):
-    #                 st.session_state.results.extend(result)
-    #             else:
-    #                 st.session_state.results.append(result)
-    #         except Exception as e:
-    #             st.error(f"Error processing file {uploaded_file.name}: {e}")
-    # overall_end_time = time.time()
-    # st.session_state.current_index = 0
-    # st.success(f"Total processing time: {overall_end_time - overall_start_time:.2f} seconds")
-    # if st.button("Submit") and uploaded_files:
     st.session_state.results = []
     t0 = time.time()
 
@@ -430,22 +398,49 @@ if "results" in st.session_state and st.session_state.results:
             procedures,
             key="proc_selector"
         )
-    # Fetch CSR & Trustee lists and stash in session_state
-    if "csr_list" not in st.session_state or "trustee_list" not in st.session_state:
-        
-#         zoho_token = get_auth_token(st.session_state.get("zoho_token"))
-        csr_users, trustee_users = get_csr_and_trustee_users(st.session_state.get("zoho_token"))
 
-
-        # put raw user‐objects into session for later
-        st.session_state.csr_list      = csr_users
-        st.session_state.trustee_list  = trustee_users
-        
-      
+    # ─── Define your allow-lists ─────────────────────────────────────────────────
+    valid_trustee_names = {
+        "Fatma Al Rahma",
+        "Hanaa Albalushi",
+        "Khozama Alhumyani",
+        "Manal Alnami",
+        "Mohammed Althawadi",
+        "Nadeen Ali",
+        "Ahmed Salah",
+    }
     
-    # ─── Prepare name lists ──────────────────────────────────────────────────
-    csr_names     = [u.get("full_name") or u.get("name") for u in st.session_state.csr_list]
+    valid_csr_names = {
+        "Sarrah Mae Antolin",
+        "Reda Najjar",
+        "Layal Makhlouf",
+        "Princess Sibayan",
+        "Hena Goyal",
+        "Odoo Test",
+        "Fatima Kanakri",
+        "Zoya Kazmi",
+        "Noha Abo ElFadl",
+        # note: Marketing Team and any entries containing “@” will simply not match
+    }
+    
+    # ─── Fetch and store in session (only once) ──────────────────────────────────
+    if "csr_list" not in st.session_state or "trustee_list" not in st.session_state:
+        csr_users, trustee_users = get_csr_and_trustee_users(st.session_state.get("zoho_token"))
+    
+        # filter by allow-list
+        st.session_state.trustee_list = [
+            u for u in trustee_users
+            if (u.get("full_name") or u.get("name")) in valid_trustee_names
+        ]
+        st.session_state.csr_list = [
+            u for u in csr_users
+            if (u.get("full_name") or u.get("name")) in valid_csr_names
+        ]
+    
+    # ─── Prepare the display names ──────────────────────────────────────────────
+    csr_names = [u.get("full_name") or u.get("name") for u in st.session_state.csr_list]
     trustee_names = [u.get("full_name") or u.get("name") for u in st.session_state.trustee_list]
+
 
     # ─── CSR picker ─────────────────────────────────────────────────────────
     if st.session_state.get("selected_csr"):
