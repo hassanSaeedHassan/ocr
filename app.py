@@ -38,7 +38,8 @@ from scripts.firebase_connectors.fire_base_connection import (
 # ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
 if "client" not in st.session_state:
     st.session_state.client = OpenAI(
-        base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
+        base_url="https://router.huggingface.co/hyperbolic/v1",
+#         base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
         api_key="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",)
 if "token" not in st.session_state:
     st.session_state.token='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'
@@ -234,8 +235,14 @@ if mode == "Appointment":
             bufs = []
             for i, url in enumerate(pdf_urls, 1):
                 r = requests.get(url); r.raise_for_status()
+                ext = url.split('.')[-1].lower()
+                if ext not in ("pdf","png","jpg","jpeg"):
+                    # fallback to content-type header
+                    ct = r.headers.get("Content-Type", "")
+                    ext = "pdf" if "pdf" in ct else "jpg"
+
                 buf = io.BytesIO(r.content)
-                buf.name = f"{row['First Name']}_{row['Last Name']}_doc{i}.pdf"
+                buf.name = f"{row['First Name']}_{row['Last Name']}_doc{i}.{ext}"
                 bufs.append(buf)
             st.session_state.selected_pdfs = bufs
         uploaded_files = st.session_state.selected_pdfs
@@ -260,39 +267,35 @@ if st.button("Submit") and uploaded_files:
     st.session_state.documents_saved = False
     st.session_state.results = []
     t0 = time.time()
-
     for f in uploaded_files:
         with st.spinner(f"Processing {f.name}…"):
-            try:
-                # first, try your normal PDF/image pipeline
-                res = process_document(f, f.name)
+            name = f.name.lower()
+            # 1) Check extension: if it’s an image, convert → PDF first
+            if name.endswith((".png", ".jpg", ".jpeg")):
+                f.seek(0)
+                img = Image.open(f)
+                img = ImageOps.exif_transpose(img)   # fix orientation
+                if img.mode != "RGB":
+                    img = img.convert("RGB")
 
-            except RuntimeError as e:
-                msg = str(e)
-                if "source or target not a PDF" in msg:
-                    st.warning(f"{f.name} is not a PDF – converting image to PDF.")
-                    try:
-                        # rewind and read raw bytes
-                        f.seek(0)
-                        img = Image.open(f)
-                        if img.mode != "RGB":
-                            img = img.convert("RGB")
+                pdf_buf = io.BytesIO()
+                img.save(pdf_buf, format="PDF")
+                pdf_buf.name = f"{f.name.rsplit('.',1)[0]}.pdf"
+                pdf_buf.seek(0)
 
-                        # wrap in a one‐page PDF
-                        pdf_buf = io.BytesIO()
-                        img.save(pdf_buf, format="PDF")
-                        pdf_buf.name = f"{f.name.rsplit('.',1)[0]}.pdf"
-                        pdf_buf.seek(0)
+                # Now process this ONE PDF
+                try:
+                    res = process_document(pdf_buf, pdf_buf.name)
+                except Exception as e:
+                    st.error(f"Failed to process converted PDF for {f.name}: {e}")
+                    continue
 
-                        # re-run your same function on the PDF buffer
-                        res = process_document(pdf_buf, pdf_buf.name)
-
-                    except Exception as e2:
-                        st.error(f"Failed to convert/process {f.name}: {e2}")
-                        continue
-
-                else:
-                    st.error(f"Error processing {f.name}: {e}")
+            else:
+                # Not an image → treat as PDF immediately
+                try:
+                    res = process_document(f, f.name)
+                except RuntimeError as e:
+                    st.error(f"Error processing PDF {f.name}: {e}")
                     continue
 
             # collect into results list
@@ -901,11 +904,11 @@ if "results" in st.session_state and st.session_state.results:
             assigned_trustee=st.session_state.selected_trustee,
             token=st.session_state.get("zoho_token")
         )
-        st.markdown("#### Zoho Payload")
+#         st.markdown("#### Zoho Payload")
 #         st.write(payload)
 #         st.write("Current token:", st.session_state.get("zoho_token"))
 
-        # 2) Post the Deal
+#         # 2) Post the Deal
         posted = post_booking(st.session_state.get("zoho_token"), payload)
         st.write("Deal posted successfully?", posted)
 
