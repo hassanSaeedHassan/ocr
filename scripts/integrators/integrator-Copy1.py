@@ -6,63 +6,208 @@ import streamlit as st
 from datetime import datetime
 import re
 from scripts.unifiers import *
+import time
+import requests
+from typing import Dict, Tuple
 
-def get_auth_token(current_auth_token='1000.aa7f6633b0d4c235ef2c317f05695a4d.c9998667002c809f7772a82e082aab67'):
+### 1) Unified retry decorator for HTTP calls ###
+def retry_on_exception(fn, retries=3, backoff=2, allowed_exceptions=(requests.exceptions.RequestException,)):
     """
-    Checks if current auth token is valid, refreshes if needed
-    
-    Args:
-        current_auth_token (str): Current Zoho OAuth token to test
-        
-    Returns:
-        str: Valid auth token (either original or refreshed)
+    Calls fn(); on allowed exceptions, sleeps and retries up to `retries` times.
+    Returns fn()’s return value, or raises on final failure.
     """
-    
-    # First test if current token is still valid
-    test_url = "https://crm.zoho.com/crm/v2.2/Deals"  # Simple endpoint to test token
-    
-    headers = {
-        'Authorization': f'Zoho-oauthtoken {current_auth_token}',
-    }
-    
+    for attempt in range(1, retries + 1):
+        try:
+            return fn()
+        except allowed_exceptions as e:
+            if attempt == retries:
+                raise
+            wait = backoff ** (attempt - 1)
+            print(f"[Retry] Attempt {attempt}/{retries} failed: {e!r}. Retrying in {wait}s…")
+            time.sleep(wait)
+
+### 2) Post a booking, retry on connection errors & 401 refresh ###
+def post_booking(auth_token: str, booking_payload: Dict) -> bool:
+    url     = "https://crm.zoho.com/crm/v2.2/Deals"
+    headers = {'Content-Type': 'application/json'}
+
+    def _call(token: str):
+        return retry_on_exception(
+            lambda: requests.post(
+                url,
+                headers={**headers, 'Authorization': f'Zoho-oauthtoken {token}'},
+                json=booking_payload,
+                timeout=10
+            ),
+            retries=3
+        )
+
+    # 1) First attempt
+    resp = _call(auth_token)
+
+    # 2) If unauthorized, refresh & retry once
+    if resp.status_code == 401:
+        auth_token = get_auth_token(auth_token)
+        resp = _call(auth_token)
+
+    # 3) Raise for anything but 2xx
     try:
-        test_response = requests.get(test_url, headers=headers)
-        
-        # If token is still valid (status code 200-299)
-        if 200 <= test_response.status_code < 300:
-            return current_auth_token
-            
-    except requests.exceptions.RequestException:
-        pass  # We'll proceed to refresh the token
-    
-    # If we get here, the token needs refreshing
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print(f"[Zoho POST /Deals] HTTP {resp.status_code}: {resp.text}")
+        return False
+
+    # 4) Check body for success
+    return bool(resp.json().get('data'))
+
+
+### 3) Search for a deal by Booking_Id, with retries & 401 refresh ###
+def get_deal_id_by_booking_id(auth_token: str, booking_id: str) -> str | None:
+    search_url = "https://crm.zoho.com/crm/v2.2/Deals/search"
+    params     = {"criteria": f"(Booking_Id:equals:{booking_id})"}
+
+    def _call(token: str):
+        return retry_on_exception(
+            lambda: requests.get(
+                search_url,
+                headers={'Authorization': f'Zoho-oauthtoken {token}'},
+                params=params,
+                timeout=10
+            ),
+            retries=3
+        )
+
+    resp = _call(auth_token)
+    if resp.status_code == 401:
+        auth_token = get_auth_token(auth_token)
+        resp = _call(auth_token)
+
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError:
+        print(f"[Zoho Search] HTTP {resp.status_code}: {resp.text}")
+        return None
+
+    try:
+        payload = resp.json()
+    except ValueError:
+        print(f"[Zoho Search] Non-JSON response: {repr(resp.text)}")
+        return None
+
+    data = payload.get("data") or []
+    return data[0].get("id") if data else None
+
+
+### 4) Upload an attachment, with retries on connection errors & 401 refresh ###
+def upload_attachment_to_deal(
+    auth_token: str,
+    deal_id: str,
+    file_name: str,
+    file_content: bytes,
+    content_type: str = "application/pdf"
+) -> Tuple[bool, str]:
+    upload_url = f"https://crm.zoho.com/crm/v2.2/Deals/{deal_id}/Attachments"
+
+    def _call(token: str):
+        return retry_on_exception(
+            lambda: requests.post(
+                upload_url,
+                headers={'Authorization': f'Zoho-oauthtoken {token}'},
+                files={'file': (file_name, file_content, content_type)},
+                timeout=10
+            ),
+            retries=3
+        )
+
+    # 1) First attempt
+    try:
+        resp = _call(auth_token)
+    except Exception as e:
+        return False, f"HTTP request failed after retries: {e}"
+
+    # 2) Handle 401 by refreshing & retrying once
+    if resp.status_code == 401:
+        auth_token = get_auth_token(auth_token)
+        try:
+            resp = _call(auth_token)
+        except Exception as e:
+            return False, f"HTTP request failed after refresh: {e}"
+
+    # 3) Final status check
+    try:
+        resp.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        return False, f"HTTP {resp.status_code}: {resp.text}"
+
+    result = resp.json()
+    if isinstance(result, dict) and result.get('data'):
+        return True, result['data'][0].get('download_url', '')
+    return False, "Unexpected response format from Zoho"
+
+
+
+def get_auth_token(current_token: str = '1000.aa7f6633b0d4c235ef2c317f05695a4d.c9998667002c809f7772a82e082aab67') -> str:
+    """
+    Returns a valid Zoho OAuth token:
+      1) If current_token works, return it.
+      2) Otherwise, hit the refresh endpoint up to 3 times with backoff.
+      3) If refresh still fails (network or 5xx), log a warning and return current_token.
+    """
     refresh_url = "https://accounts.zoho.com/oauth/v2/token"
-    
     refresh_payload = {
         'refresh_token': '1000.e5df7eae0ebc8950cb6909334050bf72.4be3953490faab658f39661c4dc64497',
-        'client_id': '1000.EMLDH1ZQIDJAUC3G46H1QR14127OSD',
+        'client_id':     '1000.EMLDH1ZQIDJAUC3G46H1QR14127OSD',
         'client_secret': 'c074d1ccbdbbc4905bb2f78a325fe048668a7b446d',
-        'grant_type': 'refresh_token'
+        'grant_type':    'refresh_token'
     }
-    
-    refresh_headers = {
-        'Content-Type': 'application/x-www-form-urlencoded',
-    }
-    
-    try:
-        refresh_response = requests.post(refresh_url, headers=refresh_headers, data=refresh_payload)
-        refresh_response.raise_for_status()
-        new_token = refresh_response.json().get('access_token')
-        
-        if new_token:
-            return new_token
-        else:
-            raise Exception("No access_token in refresh response")
-            
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Failed to refresh token: {str(e)}")
-    except Exception as e:
-        raise Exception(f"Error processing token refresh: {str(e)}")
+    refresh_headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+
+    # 1) If we already have a token, test it lightly
+    if current_token:
+        try:
+            r = requests.get(
+                "https://crm.zoho.com/crm/v2.2/Deals",
+                headers={'Authorization': f'Zoho-oauthtoken {current_token}'},
+                timeout=5
+            )
+            if 200 <= r.status_code < 300:
+                return current_token
+        except requests.exceptions.RequestException:
+            pass  # fall through to refresh
+
+    # 2) Try to refresh up to 3×
+    backoff = 1
+    for attempt in range(1, 4):
+        try:
+            resp = requests.post(
+                refresh_url,
+                data=refresh_payload,
+                headers=refresh_headers,
+                timeout=10
+            )
+            resp.raise_for_status()
+            token = resp.json().get('access_token')
+            if token:
+                return token
+            else:
+                print("[Zoho Refresh] No access_token in response")
+                break
+        except requests.exceptions.RequestException as e:
+            if attempt == 3:
+                print(f"[Zoho Refresh] All attempts failed: {e}. Falling back to existing token.")
+            else:
+                print(f"[Zoho Refresh] Attempt {attempt} failed: {e}. Retrying in {backoff}s…")
+                time.sleep(backoff)
+                backoff *= 2
+
+    # 3) If we reach here, refresh has failed — return what we have (even if expired)
+    if current_token:
+        print("[Zoho Refresh] Using existing token despite refresh errors.")
+        return current_token
+
+    raise Exception("Could not obtain a Zoho OAuth token.")
+
+
         
 def get_csr_and_trustee_users(auth_token):
     """
@@ -106,148 +251,8 @@ def get_csr_and_trustee_users(auth_token):
     return CSR_Representatives, Trustee_Employees
 
 
-def upload_attachment_to_deal(
-    auth_token: str,
-    deal_id: str,
-    file_name: str,
-    file_content: bytes,
-    content_type: str = "application/pdf"
-) -> Tuple[bool, str]:
-    """
-    Uploads an attachment to a Zoho CRM deal
-    
-    Args:
-        auth_token: Zoho OAuth token
-        deal_id: The Deal ID to attach the file to
-        file_name: Name to give the file in Zoho
-        file_content: Binary content of the file
-        content_type: MIME type of the file (default: "application/pdf")
-    
-    Returns:
-        Tuple of (success_status, message) 
-        - success_status: True if successful, False if failed
-        - message: Success URL or error message
-    """
-    upload_url = f"https://crm.zoho.com/crm/v2.2/Deals/{deal_id}/Attachments"
-    
-    headers = {
-        'Authorization': f'Zoho-oauthtoken {auth_token}',
-    }
-    
-    try:
-        files = {
-            'file': (file_name, file_content, content_type)
-        }
-        
-        response = requests.post(upload_url, headers=headers, files=files)
-        response.raise_for_status()
-        
-        result = response.json()
-        
-        if isinstance(result, dict) and result.get('data'):
-            return (True, result['data'][0].get('download_url', ''))
-        return (False, "Unexpected response format from Zoho")
-        
-    except requests.exceptions.RequestException as e:
-        return (False, f"HTTP request failed: {str(e)}")
-    except Exception as e:
-        return (False, f"Unexpected error: {str(e)}")
 
 
-def get_deal_id_by_booking_id(
-    auth_token: str,
-    booking_id:  str
-) -> str | None:
-    """
-    Retrieves the Deal ID from Zoho CRM using the Booking ID,
-    re-using your passed-in auth_token and only refreshing it on a 401.
-    Safely handles cases where Zoho returns no JSON body.
-
-    Returns:
-      deal_id or None
-    """
-
-    search_url = "https://crm.zoho.com/crm/v2.2/Deals/search"
-    params     = {"criteria": f"(Booking_Id:equals:{booking_id})"}
-
-    def _call(token: str):
-        return requests.get(
-            search_url,
-            headers={"Authorization": f"Zoho-oauthtoken {token}"},
-            params=params,
-            timeout=10
-        )
-
-    # 1) Try with the token you passed in
-    resp = _call(auth_token)
-
-    # 2) If expired, refresh once
-    if resp.status_code == 401:
-        auth_token = get_auth_token(auth_token)  # will test/refresh
-        resp = _call(auth_token)
-
-    # 3) For any other HTTP error, log and bail
-    try:
-        resp.raise_for_status()
-    except requests.exceptions.HTTPError:
-        print(f"[Zoho Search] HTTP {resp.status_code}: {resp.text}")
-        return None
-
-    # 4) Try to parse JSON safely
-    try:
-        payload = resp.json()
-    except ValueError:
-        # not JSON – maybe empty body
-        # use a plain ASCII hyphen and repr() to avoid encoding errors
-        print(f"[Zoho Search] Non-JSON response ({resp.status_code}): {repr(resp.text)}")
-        return None
-
-    # 5) Extract 'data'
-    data = payload.get("data") or []
-    if not data:
-        # no matching record
-        return None
-
-    # 6) Return the first deal's id
-    return data[0].get("id")
-
-
-
-def post_booking(auth_token: str, booking_payload: Dict) -> bool:
-    """
-    Posts a booking to Zoho CRM Deals. If the first attempt comes back 401,
-    it will refresh the token and retry exactly once.
-    """
-    url     = "https://crm.zoho.com/crm/v2.2/Deals"
-    headers = {'Content-Type': 'application/json'}
-
-    def _call(token: str):
-        return requests.post(
-            url,
-            headers={**headers, 'Authorization': f'Zoho-oauthtoken {token}'},
-            json=booking_payload,
-            timeout=10
-        )
-
-    # 1) First attempt
-    resp = _call(auth_token)
-
-    # 2) If unauthorized, refresh & retry once
-    if resp.status_code == 401:
-        auth_token = get_auth_token(auth_token)
-        resp = _call(auth_token)
-
-    # 3) Raise for anything but 2xx
-    try:
-        resp.raise_for_status()
-    except requests.exceptions.HTTPError as e:
-        # Log the full response text for debugging
-        print(f"[Zoho POST /Deals] HTTP {resp.status_code}: {resp.text}")
-        return False
-
-    # 4) Check body for success
-    data = resp.json().get('data')
-    return bool(data)
 
 
 
@@ -358,13 +363,14 @@ def build_deal_payload(
     selected_procedure: str,
     appt_date: str,     # e.g. "12-05-2025"
     time_slot: str,     # e.g. "08:15 AM"
+    booking_id:str,
     owner: dict,
     assigned_trustee: dict,
     token:str
 ) -> dict:
     # A) Booking Id
     auth_token = get_auth_token(token)
-    booking_id = next_booking_id(auth_token)
+    # booking_id = next_booking_id(auth_token)
 
     # B) Deal Name = full name of the first buyer
     buyer_rows = [r for r in person_roles if r.get("Role") == "buyer"]
