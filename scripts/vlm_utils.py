@@ -125,7 +125,7 @@ def downscale_until(image_bytes, threshold=THRESHOLD_BYTES, scale_factor=1, file
 
 
 
-def process_multipage_document(file_data, extraction_prompt, max_page=6):
+def process_multipage_document_old(file_data, extraction_prompt, max_page=6):
     """
     Extracts text data from the first few pages of a PDF by converting them to images
     and sending each to the VLM. Returns a JSON string of combined, cleaned results.
@@ -158,6 +158,68 @@ def process_multipage_document(file_data, extraction_prompt, max_page=6):
 
     # Return a JSON string for whatever downstream uses you have
     return json.dumps(combined_results, indent=2, ensure_ascii=False)
+
+def process_multipage_document(file_data, extraction_prompt, max_page=6):
+    """
+    Extracts text data from the first few pages of a PDF by converting them to images
+    and sending each to the VLM. Returns a JSON string of combined, cleaned results.
+    """
+    import base64
+    from openai import APIStatusError
+
+    combined_results = {}
+    doc = fitz.open(stream=file_data.read(), filetype="pdf")
+
+    for page_num in range(min(max_page, len(doc))):
+        page = doc.load_page(page_num)
+        pix = page.get_pixmap(matrix=fitz.Matrix(1.75, 1.75))
+        img_bytes = pix.tobytes("png")
+        uri = f"data:image/png;base64,{base64.b64encode(img_bytes).decode()}"
+
+        messages = [
+            {"type": "image_url", "image_url": {"url": uri}},
+            {"type": "text",      "text": extraction_prompt}
+        ]
+
+        with st.spinner(f"Extracting data from page {page_num+1}/{max_page}…"):
+            client = OpenAI(
+                base_url="https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
+                api_key="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"
+            )
+            try:
+                # First attempt
+                raw_output, _ = call_vlm(messages, client)
+
+            except APIStatusError as e:
+                # If request body too large, downscale and retry
+                if "length limit exceeded" in str(e).lower():
+                    st.warning(f"Page {page_num+1}: payload too large—downscaling and retrying…")
+
+                    # Decode original bytes, downscale to <100 KB
+                    original_bytes = base64.b64decode(uri.split(",", 1)[1])
+                    new_uri, small_bytes, _ = downscale_until(
+                        original_bytes,
+                        threshold=100_000,
+                        scale_factor=0.5
+                    )
+
+                    # Update the message payload
+                    messages[0]["image_url"]["url"] = new_uri
+
+                    # Retry the VLM call
+                    raw_output, _ = call_vlm(messages, client)
+                else:
+                    # Re-raise unexpected errors
+                    raise
+
+        # Clean and parse the response
+        stripped = raw_output.replace("```json", "").replace("```", "").strip()
+        page_data = post_processing(stripped)
+        combined_results[f"Page_{page_num+1}"] = page_data
+
+    doc.close()
+    return json.dumps(combined_results, indent=2, ensure_ascii=False)
+
 
 
 
