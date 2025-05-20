@@ -57,6 +57,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
+
 db = init_db()
 if "logged_in" not in st.session_state:
     st.session_state.logged_in   = False
@@ -87,17 +88,48 @@ if not st.session_state.logged_in:
         if st.button("Login"):
             user = login_user(db, email, pwd)
             if user:
+                # ─── mark as logged in ───────────────────────────
                 st.session_state.logged_in = True
                 st.session_state.user      = user
+
+                # ─── load CSR list from your Firebase auth table ───
+                rows = []
+                for doc in db.collection("auth").stream():
+                    u = doc.to_dict()
+                    # only keep entries that have an injaz_id
+                    if u.get("injaz_id"):
+                        rows.append({
+                            "injaz_id":  u["injaz_id"],
+                            "email":     u["email"].strip().lower(),
+                            "full_name": u.get("full_name"),
+                            "name":      u.get("name")
+                        })
+                st.session_state.csr_list = rows
+
+                # ─── auto-pick the logged-in CSR by email ─────────
+                logged_email = user["email"].strip().lower()
+                csr_obj = next((u for u in rows if u["email"] == logged_email), None)
+                if csr_obj:
+                    st.session_state.selected_csr = {
+                        "id":        csr_obj["injaz_id"],
+                        "email":     csr_obj["email"],
+                        "full_name": csr_obj["full_name"],
+                        "name":      csr_obj["name"]
+                    }
+                else:
+                    st.error("⚠️ Your account email isn’t in the CSR list.")
+
+                # ─── finally, restart the app with new session state ──
                 try:
                     st.experimental_rerun()
                 except AttributeError:
                     st.rerun()
-
             else:
                 st.error("Invalid credentials")
+
         if st.button("Sign up instead"):
             st.session_state.show_signup = True
+
     st.stop()
 
 # ---------- STREAMLIT UI ----------
@@ -412,28 +444,34 @@ if "results" in st.session_state and st.session_state.results:
       
     
     # ─── Prepare name lists ──────────────────────────────────────────────────
-    csr_names = [u.get("full_name") or u.get("name") for u in st.session_state.csr_list]
+    csr_names     = [u.get("full_name") or u.get("name") for u in st.session_state.csr_list]
     trustee_names = [u.get("full_name") or u.get("name") for u in st.session_state.trustee_list]
 
     # ─── CSR picker ─────────────────────────────────────────────────────────
-    selected_csr_name = st.selectbox(
-        "Assign CSR Representative",
-        ["–– None ––"] + csr_names,
-        key="csr_selector"
-    )
-    csr_obj = next(
-        (u for u in st.session_state.csr_list if (u.get("full_name") or u.get("name")) == selected_csr_name),
-        None
-    )
-    if csr_obj:
-        st.session_state.selected_csr = {
-            "id":        csr_obj["id"],
-            "email":     csr_obj.get("email"),
-            "full_name": csr_obj.get("full_name"),
-            "name":      f"{csr_obj.get('first_name','')} {csr_obj.get('last_name','')}".strip()
-        }
+    if st.session_state.get("selected_csr"):
+        # If we already have a CSR (i.e. the logged-in user), just show it…
+        csr = st.session_state.selected_csr
+        st.markdown(f"**Assigned CSR Representative:** {csr['full_name']} ({csr['email']})")
     else:
-        st.session_state.selected_csr = None
+        # …otherwise fall back to your selectbox UI
+        selected_csr_name = st.selectbox(
+            "Assign CSR Representative",
+            ["–– None ––"] + csr_names,
+            key="csr_selector"
+        )
+        if selected_csr_name != "–– None ––":
+            csr_obj = next(
+                u for u in st.session_state.csr_list
+                if (u.get("full_name") or u.get("name")) == selected_csr_name
+            )
+            st.session_state.selected_csr = {
+                "id":        csr_obj["id"],
+                "email":     csr_obj.get("email"),
+                "full_name": csr_obj.get("full_name"),
+                "name":      csr_obj.get("name")
+            }
+        else:
+            st.session_state.selected_csr = None
 
     # # ─── Trustee picker ─────────────────────────────────────────────────────
     # selected_trustee_name = st.selectbox(
