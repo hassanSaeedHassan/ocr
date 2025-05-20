@@ -5,11 +5,13 @@ from datetime import datetime
 import pandas as pd
 
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
-# @st.cache_resource
-@st.cache_resource
+
 def init_db():
-    fb_creds = st.secrets["firebase"]              # dict from TOML
-    cred = credentials.Certificate(fb_creds)        # accepts a dict :contentReference[oaicite:5]{index=5}
+    fb_creds = st.secrets["firebase"]
+    # Turn literal “\n” into actual newlines:
+    fb_creds["private_key"] = fb_creds["private_key"].replace("\\n", "\n")
+
+    cred = credentials.Certificate(fb_creds)
     try:
         firebase_admin.get_app()
     except ValueError:
