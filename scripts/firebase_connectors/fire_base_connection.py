@@ -59,51 +59,55 @@ import pandas as pd
 from datetime import datetime
 
 # @st.cache_data
-def load_appointments(_db) -> pd.DataFrame:
+def load_appointments(db) -> pd.DataFrame:
     """
-    Fetch only 'pending' appointments (excluding failed bookings), 
-    return a DataFrame with Title-Cased column names, sorted by Create At,
-    and with a 1-based index.
+    Fetch pending appointments. 
+    - If st.session_state.selected_csr is set (a CSR), keep only those unassigned 
+      or assigned to that CSR name.
+    - Otherwise (admin), return all pending.
+    Returns a DataFrame with Title-Cased columns plus raw 'id'.
     """
-    db = _db
+    # 1) Who’s the CSR?  (now stored as a name string)
+    csr_name = st.session_state.get("selected_csr")  # e.g. "Ahmed Salah" or None
+
+    # 2) Pull all pending docs
     rows = []
-
-    # ─── only pending ────────────────────────────────
-    docs = db.collection("appointments") \
-             .where("status", "==", "pending") \
-             .stream()
-
-    for doc in docs:
+    for doc in db.collection("appointments") \
+                 .where("status", "==", "pending") \
+                 .stream():
         d = doc.to_dict()
         d["id"] = doc.id
-
-        # convert Firestore timestamp to Python datetime
+        # ensure assigned_to exists (could be missing)
+        d["assigned_to"] = d.get("assigned_to", None)
+        # convert Firestore ts
         ts = d.get("createdAt")
         if hasattr(ts, "ToDatetime"):
             d["createdAt"] = ts.ToDatetime()
-
         rows.append(d)
 
-    # ─── build DataFrame ─────────────────────────────
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    # ─── drop any failed bookings ─────────────────────
+    # 3) If CSR-mode, filter by assigned_to
+    if csr_name:
+        df = df[df["assigned_to"].isna() | (df["assigned_to"] == csr_name)]
+
+    # 4) Drop any failed bookings
     if "bookingStatus" in df.columns:
         df = df[df["bookingStatus"].str.lower() != "failed"]
 
-    # ─── coerce datetime & sort ──────────────────────
+    # 5) Sort by creation time
     if "createdAt" in df.columns:
         df["createdAt"] = pd.to_datetime(df["createdAt"])
         df = df.sort_values("createdAt", ascending=True)
 
-    # ─── rename columns to Title Case ────────────────
+    # 6) Rename to Title Case
     df = df.rename(columns={
         "id":                "ID",
-        "clientType":        "Client Type",
-        "lastName":          "Last Name",
         "firstName":         "First Name",
+        "lastName":          "Last Name",
+        "clientType":        "Client Type",
         "appointmentType":   "Appointment Type",
         "status":            "Status",
         "appointmentDate":   "Appointment Date",
@@ -119,7 +123,7 @@ def load_appointments(_db) -> pd.DataFrame:
         "bookingStatus":     "Booking Status"
     })
 
-    # ─── reset index, then shift to 1-based ──────────
+    # 7) Reset index to 1-based
     df = df.reset_index(drop=True)
     df.index = df.index + 1
 
