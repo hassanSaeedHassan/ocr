@@ -7,16 +7,19 @@ import pandas as pd
 # ─── FIRESTORE INIT ────────────────────────────────────────────────────
 # @st.cache_resource
 def init_db():
-    """
-    Initialize Firebase Admin SDK and return a Firestore client.
-    """
-    cred = credentials.Certificate("injaz.json")
+    # Grab the entire [firebase] table from .streamlit/secrets.toml
+    firebase_creds: dict = st.secrets["firebase"]
+
+    # Initialize a Certificate directly from that dict
+    cred = credentials.Certificate(firebase_creds)
+
     try:
+        # If already initialized, this will simply return the existing app
         firebase_admin.get_app()
     except ValueError:
         firebase_admin.initialize_app(cred)
-    return firestore.client()
 
+    return firestore.client()
 # ─── AUTH HELPERS ───────────────────────────────────────────────────────
 def login_user(db, email: str, pwd: str) -> dict | None:
     """
