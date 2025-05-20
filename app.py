@@ -269,6 +269,7 @@ if mode == "Appointment":
 
             # 2) Otherwise, it’s either unassigned, or assigned to me, or I’m admin → go ahead
             st.session_state.selected_name = sel
+            st.session_state.appt_row = appt_doc
             st.session_state.selected_pdfs = None
 
             # If unassigned, mark it assigned to me (skip if it’s already mine)
@@ -875,7 +876,7 @@ if "results" in st.session_state and st.session_state.results:
     if st.button("Submit to Zoho"):
         # 1a) pull appointment info
         try:
-            row=appt_row
+            row = st.session_state.appt_row
             appt_date  = row["Appointment Date"]
             time_slot  = row["Time Slot"]
             booking_id = row["bookingId"]
@@ -1005,6 +1006,7 @@ if st.button("🔄 Work on another appointment"):
         "results",
         "current_index",
         "selected_trustee",
+        "appt_row",  
     ]:
         st.session_state.pop(key, None)
 
