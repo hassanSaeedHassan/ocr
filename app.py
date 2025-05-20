@@ -102,7 +102,7 @@ if not st.session_state.logged_in:
             else:
                 st.error("⚠️ Your account email isn’t in the CSR list.")
 
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Invalid credentials")
 
