@@ -59,16 +59,12 @@ st.markdown("""
 
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
 
-# ─── Initialize Firestore & Session Defaults ───────────────────────────────
 db = init_db()
-
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
-# ─── LOGIN SCREEN ──────────────────────────────────────────────────────────
 if not st.session_state.logged_in:
     st.title("🔒 Injaz OCR Login")
-
     email = st.text_input("Email")
     pwd   = st.text_input("Password", type="password")
     if st.button("Login"):
@@ -77,37 +73,29 @@ if not st.session_state.logged_in:
             st.session_state.logged_in = True
             st.session_state.user      = user
 
-            # load CSR list and auto-pick exactly as you had before…
+            # load your list of CSRs
             rows = []
             for doc in db.collection("auth").stream():
                 u = doc.to_dict()
                 if u.get("injaz_id"):
                     rows.append({
-                        "injaz_id": u["injaz_id"],
-                        "email":    u["email"].strip().lower(),
+                        "injaz_id":  u["injaz_id"],
+                        "email":     u["email"].strip().lower(),
                         "full_name": u.get("full_name"),
-                        "name":     u.get("name"),
+                        "name":      u.get("name")
                     })
             st.session_state.csr_list = rows
 
+            # auto‐pick CSR by email (using the 'name' field)
             logged_email = user["email"].strip().lower()
             csr_obj = next((u for u in rows if u["email"] == logged_email), None)
             if csr_obj:
-                st.session_state.selected_csr = {
-                    "id":        csr_obj["injaz_id"],
-                    "email":     csr_obj["email"],
-                    "full_name": csr_obj["full_name"],
-                    "name":      csr_obj["name"]
-                }
-            else:
-                st.error("⚠️ Your account email isn’t in the CSR list.")
+                st.session_state.selected_csr = csr_obj["name"]
 
             st.rerun()
         else:
             st.error("Invalid credentials")
-
     st.stop()
-
 
 # ---------- STREAMLIT UI ----------
 if "zoho_token" not in st.session_state:
@@ -117,6 +105,26 @@ if "zoho_token" not in st.session_state:
     except Exception as e:
         st.error(f"Could not get Zoho token: {e}")
         st.stop()
+        
+if st.session_state.get("logged_in"):
+    if st.button("🏠 Home"):
+        # clear all appointment‐flow state but stay logged in
+        for k in [
+            "page",
+            "selected_name",
+            "selected_pdfs",
+            "results",
+            "current_index",
+            "selected_trustee",
+        ]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+# initialize pagination & selection
+st.session_state.setdefault("page", 1)
+st.session_state.setdefault("selected_name", None)
+st.session_state.setdefault("selected_pdfs", None)
+
 st.markdown("""
     <style>
       .navbar {
@@ -144,10 +152,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# initialize pagination & selection
-st.session_state.setdefault("page", 1)
-st.session_state.setdefault("selected_name", None)
-st.session_state.setdefault("selected_pdfs", None)
+
 
 mode = "Appointment"
 uploaded_files = []
@@ -165,11 +170,79 @@ if mode == "Appointment":
         pg      = st.session_state.page
         subset  = df.iloc[(pg-1)*per_page : pg*per_page]
 
-        st.dataframe(subset[[
-            'First Name','Last Name','Client Type',
-            'Appointment Type','Appointment Date',
-            'Time Slot','Email','Phone','Status'
-        ]])
+#         st.dataframe(subset[[
+#             'First Name','Last Name','Client Type',
+#             'Appointment Type','Appointment Date',
+#             'Time Slot','Email','Phone','Status','assigned_to','staffName'
+#         ]])
+
+        is_admin = st.session_state.get("selected_csr") is None
+        if is_admin:
+            st.warning("⚡️ Admin mode: you can edit Staff Name & Assigned CSR directly.")
+
+            trustee_names = [
+                "Fatma Al Rahma","Hanaa Albalushi","Khozama Alhumyani",
+                "Manal Alnami","Mohammed Althawadi","Nadeen Ali","Ahmed Salah",
+            ]
+            csr_names = ["Reda Najjar","Layal Makhlouf","Fatima Kanakri"]
+
+            # 1) Include context + editable columns
+            editable = subset[[
+                "ID",
+                "First Name","Last Name","Client Type",
+                "Appointment Type","Appointment Date","Time Slot",
+                "staffName","assigned_to"
+            ]].copy()
+
+            # fill NaN so dropdown shows up
+            editable["assigned_to"] = editable["assigned_to"].fillna("")
+            editable["staffName"]    = editable["staffName"].fillna("")
+
+            # 2) Use data_editor, disabling all except staffName + assigned_to
+            edited = st.data_editor(
+                editable,
+                column_config={
+                    "assigned_to": st.column_config.SelectboxColumn(
+                        "Assigned CSR",
+                        options=[""] + csr_names,
+                        help="Pick a CSR (blank = unassigned)"
+                    ),
+                    "staffName": st.column_config.SelectboxColumn(
+                        "Staff Name",
+                        options=[""] + trustee_names,
+                        help="Pick a trustee (blank = unassigned)"
+                    )
+                },
+                disabled=[
+                    col for col in editable.columns
+                    if col not in ("staffName", "assigned_to")
+                ],
+                use_container_width=True
+            )
+
+            if st.button("💾 Save admin edits"):
+                for _, row in edited.iterrows():
+                    doc_id  = row["ID"]
+                    new_staff = row["staffName"]
+                    new_csr   = row["assigned_to"] or None
+                    db.collection("appointments").document(doc_id).update({
+                        "staffName":   new_staff,
+                        "assigned_to": new_csr
+                    })
+                st.success("🔄 Changes saved to Firebase.")
+                st.rerun()
+
+        else:
+            # CSR sees only their own, read-only
+            st.dataframe(
+                subset[[
+                    'First Name','Last Name','Client Type',
+                    'Appointment Type','Appointment Date',
+                    'Time Slot','Email','Phone','Status','assigned_to'
+                ]],
+                use_container_width=True
+            )
+
 
         cols = st.columns([1,2,1])
         with cols[0]:
@@ -182,8 +255,30 @@ if mode == "Appointment":
         names = (subset["First Name"] + " " + subset["Last Name"]).tolist()
         sel = st.selectbox("Select by name", names)
         if st.button("Choose Appointment"):
+            # load the row the user clicked on
+            appt_doc = subset.iloc[names.index(sel)]
+            assigned_to = appt_doc.get("assigned_to")  # this is the CSR name or None
+
+            # who am I?
+            csr_name = st.session_state.get("selected_csr")  # None for admin
+
+            # 1) If someone else already took it, and I'm not admin and not *that* CSR:
+            if assigned_to and csr_name and assigned_to != csr_name:
+                st.error(f"❌ You can’t work on this appointment—it’s already assigned to {assigned_to}.")
+                st.stop()
+
+            # 2) Otherwise, it’s either unassigned, or assigned to me, or I’m admin → go ahead
             st.session_state.selected_name = sel
             st.session_state.selected_pdfs = None
+
+            # If unassigned, mark it assigned to me (skip if it’s already mine)
+            if not assigned_to:
+                db.collection("appointments") \
+                  .document(appt_doc["ID"]) \
+                  .update({"assigned_to": csr_name})
+
+            st.rerun()
+
         st.stop()
 
     # user has chosen a name → fetch the row
@@ -203,6 +298,7 @@ if mode == "Appointment":
 
 
     pdf_urls = row.get("Document URLs", [])
+    appt_row=row
     # pdf_urls = row.get("Document URLs", [])
     uploaded_files = []
 
@@ -318,6 +414,7 @@ if "results" in st.session_state and st.session_state.results:
 
     with st.expander("Procedure & Required Documents", expanded=True):
         procedures = [
+            "–– Not selected yet ––",
     "Transfer Sell","Sell Mortgage","Sell + Mortgage Registration","Sell Development",
     "Sell Development Mortgage","Sell Development Registration","Sell Pre Registration",
     "Blocking","Unblocking + Sell","Unblocking + Sell Mortgage","Unblocking + Lease to Own",
@@ -375,7 +472,9 @@ if "results" in st.session_state and st.session_state.results:
         selected_procedure = st.selectbox(
             "Choose procedure:",
             procedures,
-            key="proc_selector"
+            index=0,   
+            key="proc_selector",
+            
         )
 
     # ─── Define your allow-lists ─────────────────────────────────────────────────
@@ -390,17 +489,7 @@ if "results" in st.session_state and st.session_state.results:
     }
     
     valid_csr_names = {
-        "Sarrah Mae Antolin",
-        "Reda Najjar",
-        "Layal Makhlouf",
-        "Princess Sibayan",
-        "Hena Goyal",
-        "Odoo Test",
-        "Fatima Kanakri",
-        "Zoya Kazmi",
-        "Noha Abo ElFadl",
-        # note: Marketing Team and any entries containing “@” will simply not match
-    }
+        "Reda Najjar", "Layal Makhlouf",  "Fatima Kanakri"}
     
     # ─── Fetch and store in session (only once) ──────────────────────────────────
     if "csr_list" not in st.session_state or "trustee_list" not in st.session_state:
@@ -423,9 +512,9 @@ if "results" in st.session_state and st.session_state.results:
 
     # ─── CSR picker ─────────────────────────────────────────────────────────
     if st.session_state.get("selected_csr"):
-        # If we already have a CSR (i.e. the logged-in user), just show it…
-        csr = st.session_state.selected_csr
-        st.markdown(f"**Assigned CSR Representative:** {csr['full_name']} ({csr['email']})")
+        csr_name = st.session_state.selected_csr
+        st.markdown(f"**Assigned CSR Representative:** {csr_name}")
+
     else:
         # …otherwise fall back to your selectbox UI
         selected_csr_name = st.selectbox(
@@ -446,28 +535,6 @@ if "results" in st.session_state and st.session_state.results:
             }
         else:
             st.session_state.selected_csr = None
-
-    # # ─── Trustee picker ─────────────────────────────────────────────────────
-    # selected_trustee_name = st.selectbox(
-    #     "Assign Trustee Employee",
-    #     ["–– None ––"] + trustee_names,
-    #     key="trustee_selector"
-    # )
-    # trustee_obj = next(
-    #     (u for u in st.session_state.trustee_list if (u.get("full_name") or u.get("name")) == selected_trustee_name),
-    #     None
-    # )
-    # if trustee_obj:
-    #     st.session_state.selected_trustee = {
-    #         "id":        trustee_obj["id"],
-    #         "email":     trustee_obj.get("email"),
-    #         "full_name": trustee_obj.get("full_name"),
-    #         "name":      f"{trustee_obj.get('first_name','')} {trustee_obj.get('last_name','')}".strip()
-    #     }
-    # else:
-    #     st.session_state.selected_trustee = None
-
-    # … after you compute trustee_names …
     
     staff_name = row.get("staffName", "").strip()
     
@@ -563,11 +630,25 @@ if "results" in st.session_state and st.session_state.results:
     current = st.session_state.results[selected_index]
     # Display PDF or image from the selected document
     col_pdf, col_ocr = st.columns(2)
-
     with col_pdf:
         filename = current.get("filename", "document")
         doc_type = current.get("doc_type", "document")
         st.write(f"{filename} classified as: {doc_type}")
+
+        if doc_type.lower().strip() in ['ids', 'passport', 'residence visa']:
+            default_label = f"{selected_index+1}.{doc_type.lower()} — {person_name}"
+        else:
+            default_label = f"{selected_index+1}.{doc_type.lower()}"
+        # show an empty input with placeholder
+        new_label = st.text_input(
+            "Rename document (optional)",
+            value="",
+            placeholder=default_label,
+            key=f"rename_{selected_index}"
+        )
+        # only save it if the user typed something
+        if new_label.strip():
+            current["custom_label"] = new_label.strip()
 
         # 1) Build a list of Data‑URI strings for each “page”:
         page_imgs = []
@@ -735,17 +816,74 @@ if "results" in st.session_state and st.session_state.results:
             if display_mode == "Form":
                 render_data_form(extracted_raw, selected_index)
 final_roles = st.session_state.get("person_roles", [])
+
+
+
 if "results" in st.session_state and st.session_state.results:
     st.markdown("### Ready to send to Zoho CRM")
+    # ── 0) Let user rename each document before upload, using VLM‐generated labels ──
+    rename_rows = []
+    for idx, doc in enumerate(st.session_state.results, start=1):
+        dt = doc.get("doc_type", "document").lower().strip()
+        # compute the VLM default label exactly as in upload logic
+        if dt in ["ids", "passport", "residence visa"]:
+            raw = doc.get("extracted_data", "")
+            data = json.loads(raw) if isinstance(raw, str) else raw
+            if "raw_text" in data:
+                try:
+                    data = json.loads(clean_json_string(data["raw_text"]))
+                except:
+                    pass
+            if dt == "ids":
+                person = data.get("front", {}).get("name_english", "").strip()
+            elif dt == "passport":
+                person = data.get("fullname", "").strip()
+            else:
+                person = (data.get("full_name") or data.get("arabic_name") or "").strip()
+            role = next(
+                (r["Role"] for r in st.session_state.person_roles if r["Name"] == person),
+                None
+            )
+            default_label = (
+                f"{idx}.{role} {dt} — {person}" if role
+                else f"{idx}.{dt} — {person}"
+            )
+        else:
+            default_label = f"{idx}.{dt}"
+
+        original = default_label
+        custom = doc.get("custom_label", default_label)
+        rename_rows.append({"VLM Label": original, "Upload As": custom})
+
+    rename_df = pd.DataFrame(rename_rows)
+
+    edited = st.data_editor(
+        rename_df,
+        column_config={
+            "Upload As": st.column_config.TextColumn("Upload As")
+        },
+        disabled=["VLM Label"],
+        use_container_width=True,
+        key="rename_table"
+    )
+
+    # write back user edits
+    for i, row in edited.iterrows():
+        st.session_state.results[i]["custom_label"] = row["Upload As"]
+
+    # ── 1) Submission button ────────────────────────────────────────────────
     if st.button("Submit to Zoho"):
-            # 1) Build the Zoho payload
+        # 1a) pull appointment info
         try:
-            appt_date = row["Appointment Date"]  # e.g. "12-05-2025"
-            time_slot = row["Time Slot"]         # e.g. "08:15 AM"
-            booking_id=row["bookingId"]
-        except :
-            appt_date=appt_date
-            time_slot=time_slot
+            row=appt_row
+            appt_date  = row["Appointment Date"]
+            time_slot  = row["Time Slot"]
+            booking_id = row["bookingId"]
+        except Exception:
+            st.error("⚠️ Could not read appointment info; please re-select.")
+            st.stop()
+
+        # 1b) build & post deal
         payload = build_deal_payload(
             st.session_state.results,
             st.session_state.person_roles,
@@ -757,118 +895,108 @@ if "results" in st.session_state and st.session_state.results:
             assigned_trustee=st.session_state.selected_trustee,
             token=st.session_state.get("zoho_token")
         )
-#         st.markdown("#### Zoho Payload")
-#         st.write(payload)
-#         st.write("Current token:", st.session_state.get("zoho_token"))
-
-#         # 2) Post the Deal
         posted = post_booking(st.session_state.get("zoho_token"), payload)
-        st.write("Deal posted successfully?", posted)
-
         if not posted:
             st.error("❌ Failed to create Deal in Zoho. Check logs for details.")
-        else:
-            # 3) Retrieve Zoho’s internal deal ID by Booking_Id (poll until available)
-            booking_id = payload["data"][0]["Booking_Id"]
-            st.info(f"Looking up deal for Booking_Id={booking_id}…")
+            st.stop()
+        st.success("✅ Deal creation requested. Waiting for Zoho to assign an ID…")
 
-            # refresh token once up front
-            token = get_auth_token(st.session_state.get("zoho_token"))
-            st.session_state["zoho_token"] = token
+        # ── 2) Poll for deal ID ────────────────────────────────────────────────
+        token = get_auth_token(st.session_state.get("zoho_token"))
+        st.session_state["zoho_token"] = token
 
-            timeout_secs = 120         # overall timeout
-            interval_secs = 15        # how often to retry
-            deadline = time.time() + timeout_secs
-            deal_id = None
+        def fetch_deal_id_by_booking(token: str, booking_id: str, timeout=120, interval=5):
+            deadline = time.time() + timeout
+            headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+            url = "https://crm.zoho.com/crm/v2.2/Deals/search"
+            params = {"criteria": f"(Booking_Id:equals:{booking_id})"}
+            while time.time() < deadline:
+                r = requests.get(url, headers=headers, params=params, timeout=10)
+                if r.status_code == 200:
+                    j = r.json()
+                    if j.get("data"):
+                        return j["data"][0]["id"]
+                time.sleep(interval)
+            return None
 
-            with st.spinner("Waiting for Zoho to index the new deal…"):
-                while time.time() < deadline:
-                    deal_id = get_deal_id_by_booking_id(token, booking_id)
-                    if deal_id:
-                        break
-                    time.sleep(interval_secs)
+        deal_id = fetch_deal_id_by_booking(token, booking_id)
+        if not deal_id:
+            st.error("❌ Timed out waiting for Zoho to return a deal ID.")
+            st.stop()
+        st.success(f"✅ Deal ID={deal_id} acquired. Uploading attachments…")
 
-            if not deal_id:
-                st.error(f"❌ Could not find Deal for Booking_Id={booking_id} after {timeout_secs}s")
-            else:
-                st.success(f"✅ Zoho Deal ID: {deal_id}")
-                try:
-                    appointment_id = row["ID"]  # Assuming 'id' is the document ID in Firebase
-                    appointment_ref = db.collection("appointments").document(appointment_id)
-                    appointment_ref.update({"status": "done"})
-                    st.success(f"✅ Appointment status updated to 'done' in Firebase.")
-                except Exception as e:
-                    st.error(f"❌ Failed to update appointment status in Firebase: {e}")
-                # 4) Upload each renamed document
-                with st.spinner("Uploading attachments to Zoho..."):
-                    for idx, doc in enumerate(st.session_state.results, start=1):
-                        dt = doc.get("doc_type", "document").lower().strip()
+        # ── 3) Upload each PDF ────────────────────────────────────────────────
+        with st.spinner("Uploading attachments…"):
+            for idx, doc in enumerate(st.session_state.results, start=1):
+                dt = doc.get("doc_type","document").lower().strip()
+                # recompute default_label for fallback
+                if dt in ["ids","passport","residence visa"]:
+                    raw = doc.get("extracted_data","")
+                    data = json.loads(raw) if isinstance(raw,str) else raw
+                    if "raw_text" in data:
+                        try:
+                            data = json.loads(clean_json_string(data["raw_text"]))
+                        except: pass
+                    if dt == "ids":
+                        person = data.get("front",{}).get("name_english","").strip()
+                    elif dt == "passport":
+                        person = data.get("fullname","").strip()
+                    else:
+                        person = (data.get("full_name") or data.get("arabic_name") or "").strip()
+                    role = next(
+                        (r["Role"] for r in st.session_state.person_roles if r["Name"]==person),
+                        None
+                    )
+                    default_label = (
+                        f"{idx}.{role} {dt} — {person}" if role
+                        else f"{idx}.{dt} — {person}"
+                    )
+                else:
+                    default_label = f"{idx}.{dt}"
 
-                        # build human-readable label
-                        if dt in ["ids", "passport", "residence visa"]:
-                            raw = doc.get("extracted_data", "")
-                            if isinstance(raw, str):
-                                try:
-                                    data = json.loads(raw)
-                                except:
-                                    data = {"raw_text": raw}
-                            else:
-                                data = raw
-                            if "raw_text" in data and isinstance(data["raw_text"], str):
-                                try:
-                                    data = json.loads(clean_json_string(data["raw_text"]))
-                                except:
-                                    pass
+                label_to_use = doc.get("custom_label", default_label)
+                base = label_to_use.replace(" ", "_").replace("/", "_")
+                file_name = f"{base}.pdf"
 
-                            if dt == "ids":
-                                person = data.get("front", {}).get("name_english", "").strip()
-                            elif dt == "passport":
-                                person = data.get("fullname", "").strip()
-                            else:
-                                person = (data.get("full_name") or data.get("arabic_name") or "").strip()
+                content = doc.get("pdf_bytes") or doc.get("original_pdf_bytes")
+                if not content:
+                    st.warning(f"No PDF content for {file_name}, skipping.")
+                    continue
 
-                            role = next(
-                                (r["Role"] for r in st.session_state.person_roles if r["Name"] == person),
-                                None
-                            )
-                            label = f"{idx}.{role} {dt} — {person}" if role else f"{idx}.{dt} — {person}"
-                        else:
-                            label = f"{idx}.{dt}"
+                ok, msg = upload_attachment_to_deal(
+                    auth_token   = token,
+                    deal_id      = deal_id,
+                    file_name    = file_name,
+                    file_content = content,
+                    content_type = "application/pdf"
+                )
+                # retry once on 401
+                if not ok and "401" in msg:
+                    token = get_auth_token(token)
+                    st.session_state["zoho_token"] = token
+                    ok, msg = upload_attachment_to_deal(
+                        auth_token   = token,
+                        deal_id      = deal_id,
+                        file_name    = file_name,
+                        file_content = content,
+                        content_type = "application/pdf"
+                    )
+                if ok:
+                    st.write(f"✅ `{file_name}` → {msg}")
+                else:
+                    st.error(f"❌ `{file_name}` failed: {msg}")
 
-                        base_name = label.replace(" ", "_").replace("/", "_")
-                        file_name = f"{base_name}.pdf"
+        st.success("🎉 All attachments uploaded!")
+        st.write(row)
+        try:
+            doc_id = appt_row["ID"]
+            db.collection("appointments").document(doc_id).update({
+                "status": "done"
+            })
+            st.success("✅ Appointment status set to Done in Firebase.")
+        except Exception as e:
+            st.error(f"⚠️ Failed to update appointment status: {e}")
 
-                        file_bytes = doc.get("pdf_bytes") or doc.get("original_pdf_bytes")
-                        if not file_bytes:
-                            st.warning(f"No PDF content for {file_name}, skipping.")
-                            continue
-
-                        # first upload attempt
-                        ok, msg = upload_attachment_to_deal(
-                            auth_token   = token,
-                            deal_id      = deal_id,
-                            file_name    = file_name,
-                            file_content = file_bytes,
-                            content_type = "application/pdf"
-                        )
-
-                        # on 401, refresh and retry once
-                        if not ok and "401" in msg:
-                            token = get_auth_token(token)
-                            st.session_state["zoho_token"] = token
-                            ok, msg = upload_attachment_to_deal(
-                                auth_token   = token,
-                                deal_id      = deal_id,
-                                file_name    = file_name,
-                                file_content = file_bytes,
-                                content_type = "application/pdf"
-                            )
-
-                        if ok:
-                            st.write(f"✅ Uploaded `{file_name}` → {msg}")
-                        else:
-                            st.error(f"❌ Failed to upload `{file_name}`: {msg}")
-                          
 if st.button("🔄 Work on another appointment"):
     # 1) Remove exactly the bits we want reset
     for key in [
@@ -876,7 +1004,6 @@ if st.button("🔄 Work on another appointment"):
         "selected_pdfs",
         "results",
         "current_index",
-        "selected_csr",
         "selected_trustee",
     ]:
         st.session_state.pop(key, None)
