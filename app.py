@@ -269,7 +269,6 @@ if mode == "Appointment":
 
             # 2) Otherwise, it’s either unassigned, or assigned to me, or I’m admin → go ahead
             st.session_state.selected_name = sel
-            st.session_state.appt_row = appt_doc
             st.session_state.selected_pdfs = None
 
             # If unassigned, mark it assigned to me (skip if it’s already mine)
@@ -334,44 +333,122 @@ if mode == "Appointment":
         uploaded_files.extend(extra)
 
 
-
+password_document=st.text_input(label='Document password')
 
 if st.button("Submit") and uploaded_files:
     st.session_state.documents_saved = False
     st.session_state.results = []
     t0 = time.time()
+    
+    # 0) Pull your contract password once
+    contract_pw = row.get("contractPassword", "").strip()
+    if contract_pw=='':
+            contract_pw=password_document
+    
+    # 1) Pre-scan to find which PDF (if any) is encrypted
+    encrypted_file = None
+    for f in uploaded_files:
+        name = f.name.lower()
+        # skip images
+        if name.endswith((".png", ".jpg", ".jpeg")):
+            continue
+
+        # try opening it without a password
+        f.seek(0)
+        raw = f.read()
+        try:
+            _ = fitz.open(stream=raw, filetype="pdf")
+        except RuntimeError:
+            # this PDF needs a password
+            encrypted_file = f
+            break
+        except Exception:
+            # some other error—ignore here
+            continue
+
+    if encrypted_file:
+        st.info(f"🔒 The file `{encrypted_file.name}` appears encrypted and will use your contractPassword.")
+
+    # 2) Now your main processing loop
     for f in uploaded_files:
         with st.spinner(f"Processing {f.name}…"):
             name = f.name.lower()
-            # 1) Check extension: if it’s an image, convert → PDF first
+
+            # a) Image → PDF conversion (unchanged)
             if name.endswith((".png", ".jpg", ".jpeg")):
                 f.seek(0)
                 img = Image.open(f)
-                img = ImageOps.exif_transpose(img)   # fix orientation
+                img = ImageOps.exif_transpose(img)
                 if img.mode != "RGB":
                     img = img.convert("RGB")
 
                 pdf_buf = io.BytesIO()
-                img.save(pdf_buf, format="PDF")
                 pdf_buf.name = f"{f.name.rsplit('.',1)[0]}.pdf"
+                img.save(pdf_buf, format="PDF")
                 pdf_buf.seek(0)
 
-                # Now process this ONE PDF
                 try:
                     res = process_document(pdf_buf, pdf_buf.name)
                 except Exception as e:
                     st.error(f"Failed to process converted PDF for {f.name}: {e}")
                     continue
 
+
             else:
+
                 # Not an image → treat as PDF immediately
+
+                # 0) Pull your password (contractPassword or user‐entered)
+                contract_pw = row.get("contractPassword", "").strip() or password_document
+
+                # 1) Read the raw upload bytes
+                f.seek(0)
+                raw = f.read()
+
+                # 2) Open in PyMuPDF
                 try:
-                    res = process_document(f, f.name)
-                except RuntimeError as e:
-                    st.error(f"Error processing PDF {f.name}: {e}")
+                    doc = fitz.open(stream=raw, filetype="pdf")
+                except Exception as e:
+                    st.error(f"❌ Could not open `{f.name}` at all: {e}")
                     continue
 
-            # collect into results list
+                # 3) If encrypted, authenticate
+                if doc.needs_pass:  # True if user password required :contentReference[oaicite:0]{index=0}
+                    if not contract_pw:
+                        st.error(f"❌ `{f.name}` is encrypted but no password provided.")
+                        doc.close()
+                        continue
+                    if not doc.authenticate(contract_pw):  # unlock with user password :contentReference[oaicite:1]{index=1}
+                        st.error(f"❌ Wrong password for `{f.name}`.")
+                        doc.close()
+                        continue
+
+                # 4) Save a *decrypted* copy to a temp file
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    temp_path = tmp.name
+                try:
+                    doc.save(temp_path)      # full rewrite, strips encryption
+                except Exception as e_save:
+                    st.error(f"❌ Could not write decrypted PDF for `{f.name}`: {e_save}")
+                    doc.close()
+                    os.remove(temp_path)
+                    continue
+                doc.close()
+
+                # 5) Feed that temp‐file into your existing OCR pipeline
+                try:
+                    with open(temp_path, "rb") as unlocked:
+                        res = process_document(unlocked, f.name)
+                except Exception as e_proc:
+                    st.error(f"❌ Error processing decrypted PDF `{f.name}`: {e_proc}")
+                    os.remove(temp_path)
+                    continue
+
+                # 6) Clean up the temp file
+                os.remove(temp_path)
+
+
+            # c) collect results
             if isinstance(res, list):
                 st.session_state.results.extend(res)
             else:
@@ -876,7 +953,7 @@ if "results" in st.session_state and st.session_state.results:
     if st.button("Submit to Zoho"):
         # 1a) pull appointment info
         try:
-            row = st.session_state.appt_row
+            row=appt_row
             appt_date  = row["Appointment Date"]
             time_slot  = row["Time Slot"]
             booking_id = row["bookingId"]
@@ -1006,7 +1083,6 @@ if st.button("🔄 Work on another appointment"):
         "results",
         "current_index",
         "selected_trustee",
-        "appt_row",  
     ]:
         st.session_state.pop(key, None)
 
