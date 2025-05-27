@@ -124,36 +124,46 @@ if st.session_state.get("logged_in"):
 st.session_state.setdefault("page", 1)
 st.session_state.setdefault("selected_name", None)
 st.session_state.setdefault("selected_pdfs", None)
+# 1) Read & base64-encode the logo
+with open("assets/Injaz-Logo-New.png", "rb") as img_f:
+    b64 = base64.b64encode(img_f.read()).decode()
 
-st.markdown("""
+# 2) Render full HTML + CSS via components.html()
+components.html(f"""
+<!DOCTYPE html>
+<html>
+  <head>
     <style>
-      .navbar {
+      .navbar {{
         background-color: #ffffff;
         padding: 0.5rem 1rem;
         display: flex;
         align-items: center;
         border-bottom: 1px solid #e0e0e0;
-      }
-      .navbar img {
+      }}
+      .navbar img {{
         height: 40px;
-      }
-      .navbar .title {
+      }}
+      .navbar .title {{
         flex: 1;
         text-align: center;
         font-size: 1.5rem;
         font-weight: bold;
-        margin-right: 40px;  /* to offset the logo width */
-      }
+        margin-right: 40px;
+      }}
     </style>
+  </head>
+  <body>
     <div class="navbar">
-      <img src="https://bunny-wp-pullzone-x8psmhth4d.b-cdn.net/wp-content/uploads/2022/12/Asset-1.svg" alt="Logo">
+      <img src="data:image/png;base64,{b64}" alt="Logo" />
       <div class="title">Injaz OCR System</div>
     </div>
-""", unsafe_allow_html=True)
+  </body>
+</html>
+""", height=80)
 
 
-
-
+# <img src="https://bunny-wp-pullzone-x8psmhth4d.b-cdn.net/wp-content/uploads/2022/12/Asset-1.svg" alt="Logo">
 mode = "Appointment"
 uploaded_files = []
 
@@ -178,7 +188,7 @@ if mode == "Appointment":
 
         is_admin = st.session_state.get("selected_csr") is None
         if is_admin:
-            st.warning("⚡️ Admin mode: you can edit Staff Name & Assigned CSR directly.")
+            st.warning("⚡️ Admin mode: you can edit Staff Name, Assigned CSR, or delete appointments.")
 
             trustee_names = [
                 "Fatma Al Rahma","Hanaa Albalushi","Khozama Alhumyani",
@@ -186,19 +196,23 @@ if mode == "Appointment":
             ]
             csr_names = ["Reda Najjar","Layal Makhlouf","Fatima Kanakri"]
 
-            # 1) Include context + editable columns
+            # 1) Create editable view with Booking ID + the columns you want
             editable = subset[[
-                "ID",
+                "Booking ID",
                 "First Name","Last Name","Client Type",
                 "Appointment Type","Appointment Date","Time Slot",
                 "staffName","assigned_to"
             ]].copy()
 
-            # fill NaN so dropdown shows up
+            # 2) Store the Firestore doc ID as the DataFrame index
+            editable.index = subset["ID"]
+
+            # 3) Fill defaults and add the Delete checkbox
             editable["assigned_to"] = editable["assigned_to"].fillna("")
             editable["staffName"]    = editable["staffName"].fillna("")
+            editable["Delete"]       = False
 
-            # 2) Use data_editor, disabling all except staffName + assigned_to
+            # 4) Render the editor, hiding the index (so users never see the doc ID)
             edited = st.data_editor(
                 editable,
                 column_config={
@@ -211,31 +225,43 @@ if mode == "Appointment":
                         "Staff Name",
                         options=[""] + trustee_names,
                         help="Pick a trustee (blank = unassigned)"
-                    )
+                    ),
+                    "Delete": st.column_config.CheckboxColumn(
+                        "Delete Row",
+                        help="Check to delete this appointment entirely"
+                    ),
                 },
                 disabled=[
                     col for col in editable.columns
-                    if col not in ("staffName", "assigned_to")
+                    if col not in ("staffName", "assigned_to", "Delete")
                 ],
+                hide_index=True,            # <- hides the Firestore ID index
                 use_container_width=True
             )
 
+            # 5) Save edits (re-assign CSR/trustee)
             if st.button("💾 Save admin edits"):
-                for _, row in edited.iterrows():
-                    doc_id  = row["ID"]
-                    new_staff = row["staffName"]
-                    new_csr   = row["assigned_to"] or None
+                for doc_id, row in edited.iterrows():
                     db.collection("appointments").document(doc_id).update({
-                        "staffName":   new_staff,
-                        "assigned_to": new_csr
+                        "staffName":   row["staffName"],
+                        "assigned_to": row["assigned_to"] or None
                     })
-                st.success("🔄 Changes saved to Firebase.")
+                st.success("🔄 Assignments saved to Firebase.")
                 st.rerun()
+
+            # 6) Delete checked rows
+            if st.button("💥 Delete selected appointments"):
+                to_delete = edited[edited["Delete"]]
+                for doc_id in to_delete.index:
+                    db.collection("appointments").document(doc_id).delete()
+                st.success(f"🗑️ Deleted {len(to_delete)} appointment(s).")
+                st.rerun()
+
 
         else:
             # CSR sees only their own, read-only
             st.dataframe(
-                subset[[
+                subset[['Booking ID',
                     'First Name','Last Name','Client Type',
                     'Appointment Type','Appointment Date',
                     'Time Slot','Email','Phone','Status','assigned_to'
@@ -260,7 +286,8 @@ if mode == "Appointment":
             assigned_to = appt_doc.get("assigned_to")  # this is the CSR name or None
 
             # who am I?
-            csr_name = st.session_state.get("selected_csr")  # None for admin
+            csr_name = st.session_state.get("selected_csr") # None for admin
+
 
             # 1) If someone else already took it, and I'm not admin and not *that* CSR:
             if assigned_to and csr_name and assigned_to != csr_name:
@@ -948,36 +975,54 @@ if "results" in st.session_state and st.session_state.results:
     # write back user edits
     for i, row in edited.iterrows():
         st.session_state.results[i]["custom_label"] = row["Upload As"]
+        
+        # check whether we've already submitted
+    submitted = st.session_state.get("submitted_to_zoho", False)
 
-    # ── 1) Submission button ────────────────────────────────────────────────
-    if st.button("Submit to Zoho"):
-        # 1a) pull appointment info
+    # the button will be greyed out once submitted == True
+    if st.button("Submit to Zoho", disabled=submitted):
+        # 1a) pull appointment info from the selected row
         try:
+
             row=appt_row
             appt_date  = row["Appointment Date"]
             time_slot  = row["Time Slot"]
-            booking_id = row["bookingId"]
+            booking_id = row["Booking ID"]        # note change to Booking ID key
         except Exception:
             st.error("⚠️ Could not read appointment info; please re-select.")
             st.stop()
 
-        # 1b) build & post deal
+        # build a minimal appointment dict for the payload
+        appt_row = {
+            "First Name":         row["First Name"],
+            "Last Name":          row["Last Name"],
+            "Email":              row["Email"],
+            "Phone":              row["Phone"],
+            "Individual Company": row.get("Individual Company")
+        }
+
+        # 1b) build & post deal, passing the new appt_row
         payload = build_deal_payload(
-            st.session_state.results,
-            st.session_state.person_roles,
-            selected_procedure,
-            appt_date,
-            time_slot,
-            booking_id,
+            results=st.session_state.results,
+            person_roles=st.session_state.person_roles,
+            selected_procedure=selected_procedure,
+            appt_date=appt_date,
+            time_slot=time_slot,
+            booking_id=booking_id,
             owner=st.session_state.selected_csr,
             assigned_trustee=st.session_state.selected_trustee,
+            appt_row=appt_row,
             token=st.session_state.get("zoho_token")
         )
         posted = post_booking(st.session_state.get("zoho_token"), payload)
         if not posted:
             st.error("❌ Failed to create Deal in Zoho. Check logs for details.")
             st.stop()
+
         st.success("✅ Deal creation requested. Waiting for Zoho to assign an ID…")
+
+        # 1c) mark as submitted so button is now disabled
+        st.session_state["submitted_to_zoho"] = True
 
         # ── 2) Poll for deal ID ────────────────────────────────────────────────
         token = get_auth_token(st.session_state.get("zoho_token"))
