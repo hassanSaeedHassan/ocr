@@ -8,7 +8,10 @@ import re
 from scripts.unifiers import *
 import time
 import requests
-from typing import Dict, Tuple
+import difflib
+from datetime import datetime
+from typing import List, Dict, Any
+from scripts.unifiers import unify_contract_f
 
 ### 1) Unified retry decorator for HTTP calls ###
 def retry_on_exception(fn, retries=3, backoff=2, allowed_exceptions=(requests.exceptions.RequestException,)):
@@ -428,150 +431,8 @@ def next_booking_id(access_token: str) -> str:
 
 
 
+
 def build_deal_payload_old(
-    results: list,
-    person_roles: list,
-    selected_procedure: str,
-    appt_date: str,     # "12-05-2025"
-    time_slot: str,     # "08:15 AM"
-    booking_id: str,
-    owner,              # can be dict or plain CSR-name string
-    assigned_trustee: dict,
-    token: str
-) -> dict:
-    auth_token = get_auth_token(token)
-
-    def _normalize_user(u):
-        """
-        Accept either:
-          - a dict with .get("id")/.get("name")
-          - a legacy dict with .get("injaz_id")/.get("name")
-          - or just the CSR name string
-
-        Return a Zoho‐ready {"module":"Users","id":..., "name":...} or empty dict.
-        """
-        # 1) If they passed the full dict already:
-        if isinstance(u, dict):
-            zoho_id = u.get("injaz_id") or u.get("id")
-            zoho_name = u.get("name") or u.get("full_name") or u.get("username")
-            if zoho_id and zoho_name:
-                return {"module":"Users","id":zoho_id,"name":zoho_name}
-
-        # 2) Otherwise they passed just the name string:
-        if isinstance(u, str):
-            for csr in st.session_state.csr_list:
-                # look in either key
-                candidate_name = csr.get("name") or csr.get("full_name")
-                if candidate_name == u:
-                    zoho_id = csr.get("injaz_id") or csr.get("id")
-                    return {"module":"Users","id":zoho_id,"name":candidate_name}
-
-        return {}
-
-
-    owner_block = _normalize_user(owner)
-    csr_block   = owner_block  # same thing for Assigned_CSR
-
-    # ── build_party_details unchanged ────────────────────────────
-    def build_party_details(main_role, poa_role, prefix):
-        mains = [r for r in person_roles if r["Role"] == main_role]
-        poas  = [r for r in person_roles if r["Role"] == poa_role]
-        details = []
-        for m in mains:
-            first, last = m["Name"].split()[0], m["Name"].split()[-1]
-            entry = {
-                f"{prefix}_First_Name":     first,
-                f"{prefix}_Last_Name":      last,
-                f"{prefix}_POA_First_Name": "",
-                f"{prefix}_POA_Last_Name":  "",
-                f"Is_{prefix.lower()}_Individual_Company": "Individual",
-            }
-            if poas:
-                pp = poas[0]["Name"].split()
-                entry[f"{prefix}_POA_First_Name"] = pp[0]
-                entry[f"{prefix}_POA_Last_Name"]  = pp[-1]
-            details.append(entry)
-        return details
-
-    buyer_details  = build_party_details("buyer", "poa_buyer",   "Buyer")
-    seller_details = build_party_details("seller","poa_seller", "Seller")
-
-    # ── create contacts ───────────────────────────────────────────
-    buyer_contacts = []
-    for b in [r for r in person_roles if r["Role"] == "buyer"]:
-        fn, ln = b["Name"].split()[0], b["Name"].split()[-1]
-        resp = create_contact(
-            auth_token, fn, ln,
-            email=b.get("Email",""),
-            phone=b.get("Phone",""),
-            billing_phone=b.get("Phone",""),
-            owner=owner_block,
-            created_by=owner_block,
-            lead_source="Zoho Bookings"
-        )
-        details = resp["data"][0]["details"]
-        buyer_contacts.append({"module":"Contacts","name":f"{fn} {ln}","id":details["id"]})
-
-    seller_contacts = []
-    for s in [r for r in person_roles if r["Role"] == "seller"]:
-        fn, ln = s["Name"].split()[0], s["Name"].split()[-1]
-        resp = create_contact(
-            auth_token, fn, ln,
-            email=s.get("Email",""),
-            phone=s.get("Phone",""),
-            billing_phone=s.get("Phone",""),
-            owner=owner_block,
-            created_by=owner_block,
-            lead_source="Zoho Bookings"
-        )
-        details = resp["data"][0]["details"]
-        seller_contacts.append({"module":"Contacts","name":f"{fn} {ln}","id":details["id"]})
-
-    # ── merge contacts into details ────────────────────────────────
-    for i, entry in enumerate(buyer_details):
-        entry["Buyer_contact"] = buyer_contacts[i]
-    for i, entry in enumerate(seller_details):
-        entry["Seller_Contact"] = seller_contacts[i]
-
-    # ── extract price ──────────────────────────────────────────────
-    price = None
-    for d in results:
-        if "contract f" in d.get("doc_type","").lower():
-            unified = unify_contract_f(d["extracted_data"])
-            price = (
-                unified["Property Financial Information"]["Sell Price"]
-                .replace("AED","").replace(",","").strip()
-            )
-            break
-
-    # ── format date ────────────────────────────────────────────────
-    dt = datetime.strptime(appt_date, "%d-%m-%Y")
-    iso_date = dt.strftime("%Y-%m-%d")
-
-    # ── assemble final record ──────────────────────────────────────
-    record = {
-        "Deal_Name":          person_roles[0]["Name"],
-        "Booking_Id":         booking_id,
-        "Appointment_Status": "Verification Pending",
-        "Date":               iso_date,
-        "Time":               time_slot,
-        "Buyer_Details1":     buyer_details,
-        "Seller_Details1":    seller_details,
-        "Buyer_contact":      buyer_contacts[0],
-        "Seller_Contact":     seller_contacts[0],
-        **({"Owner": owner_block} if owner_block else {}),
-        **({"Assigned_CSR": csr_block} if csr_block else {}),
-        **({"Assigned_trustee": assigned_trustee} if assigned_trustee else {}),
-        "Stage":              "Document Verification pending from CSR",
-        "Individual_Company": "Individual",
-        "Procedure_Type":     selected_procedure,
-        "Selling_Price":      float(price) if price else None,
-        "Lead_Source":        "Booking Form"
-    }
-
-    return {"data": [record]}
-
-def build_deal_payload(
     results: list,
     person_roles: list,
     selected_procedure: str,
@@ -698,6 +559,145 @@ def build_deal_payload(
         "Procedure_Type": selected_procedure,
         **({"Selling_Price": float(price)} if price else {}),
         "Lead_Source": "Booking Form"
+    }
+
+    return {"data": [record]}
+
+
+
+
+def build_deal_payload(
+    results: List[Dict[str, Any]],
+    person_roles: List[Dict[str, Any]],
+    selected_procedure: str,
+    appt_date: str,       # e.g. "12-05-2025"
+    time_slot: str,       # e.g. "08:15 AM"
+    booking_id: str,
+    owner: Any,           # dict or CSR-name string
+    assigned_trustee: Dict[str, Any],
+    appt_row: Dict[str, Any],  # must contain "First Name", "Last Name", "Email", "Phone", "Individual Company"
+    token: str
+) -> Dict[str, Any]:
+    auth_token = get_auth_token(token)
+
+    def _normalize_user(u):
+        if isinstance(u, dict):
+            zoho_id   = u.get("injaz_id") or u.get("id")
+            zoho_name = u.get("name")   or u.get("full_name")
+            if zoho_id and zoho_name:
+                return {"module":"Users","id":zoho_id,"name":zoho_name}
+        if isinstance(u, str):
+            for csr in st.session_state.csr_list:
+                cname = csr.get("name") or csr.get("full_name")
+                if cname == u:
+                    return {
+                        "module":"Users",
+                        "id": csr.get("injaz_id") or csr.get("id"),
+                        "name": cname
+                    }
+        return {}
+
+    owner_block = _normalize_user(owner)
+    csr_block   = owner_block
+
+    def _build_party(role_main, role_poa, prefix):
+        mains = [r for r in person_roles if r.get("Role") == role_main]
+        poas  = [r for r in person_roles if r.get("Role") == role_poa]
+        out = []
+        for m in mains:
+            parts = m.get("Name", "").split()
+            first, last = (parts[0], parts[-1]) if parts else ("","")
+            entry = {
+                f"{prefix}_First_Name": first,
+                f"{prefix}_Last_Name": last,
+                f"{prefix}_POA_First_Name": "",
+                f"{prefix}_POA_Last_Name": "",
+                f"Is_{prefix.lower()}_Individual_Company": "Individual",
+            }
+            if poas:
+                pp = poas[0].get("Name","").split()
+                entry[f"{prefix}_POA_First_Name"] = pp[0] if pp else ""
+                entry[f"{prefix}_POA_Last_Name"]  = pp[-1] if pp else ""
+            out.append(entry)
+        return out
+
+    def _create_contacts(role: str) -> List[Dict[str, Any]]:
+        contacts = []
+        for r in person_roles:
+            if r.get("Role") != role:
+                continue
+            parts = r.get("Name","").split()
+            fn, ln = (parts[0], parts[-1]) if parts else ("","")
+            resp = create_contact(
+                auth_token, fn, ln,
+                email=r.get("Email",""),
+                phone=r.get("Phone",""),
+                billing_phone=r.get("Phone",""),
+                owner=owner_block,
+                created_by=owner_block,
+                lead_source="Zoho Bookings"
+            )
+            det = resp.get("data", [{}])[0].get("details", {})
+            contacts.append({
+                "module": "Contacts",
+                "name":    f"{fn} {ln}",
+                "id":      det.get("id")
+            })
+        return contacts
+
+    buyer_details   = _build_party("buyer",   "poa_buyer",   "Buyer")
+    seller_details  = _build_party("seller",  "poa_seller",  "Seller")
+    buyer_contacts  = _create_contacts("buyer")
+    seller_contacts = _create_contacts("seller")
+
+    # flatten for matching
+    all_contacts = buyer_contacts + seller_contacts
+
+    # match by first OR last name
+    appt_first = appt_row.get("First Name","").strip()
+    appt_last  = appt_row.get("Last Name","").strip()
+    matched = None
+    for c in all_contacts:
+        parts = c["name"].split()
+        if appt_first in parts or appt_last in parts:
+            matched = c
+            break
+    if not matched and all_contacts:
+        matched = all_contacts[0]
+
+    # extract price
+    price = None
+    for d in results:
+        if "contract f" in d.get("doc_type","").lower():
+            u = unify_contract_f(d.get("extracted_data", {}))
+            price_str = u.get("Property Financial Information", {}).get("Sell Price","")
+            price = price_str.replace("AED","").replace(",","").strip()
+            break
+
+    iso_date = datetime.strptime(appt_date, "%d-%m-%Y").strftime("%Y-%m-%d")
+
+    record = {
+        "Deal_Name":        person_roles[0].get("Name") if person_roles else None,
+        "Booking_Id":       booking_id,
+        "Appointment_Status":"Verification Pending",
+        "Date":             iso_date,
+        "Time":             time_slot,
+        **({"Buyer_Details1":  buyer_details}  if buyer_details  else {}),
+        **({"Seller_Details1": seller_details} if seller_details else {}),
+        **({"Buyer_contact":  buyer_contacts[0]}  if buyer_contacts  else {}),
+        **({"Seller_Contact": seller_contacts[0]} if seller_contacts else {}),
+        **({"Owner":         owner_block} if owner_block else {}),
+        **({"Assigned_CSR":  csr_block}   if csr_block   else {}),
+        **({"Assigned_trustee": assigned_trustee} if assigned_trustee else {}),
+        # new appointment fields:
+        "Email":             appt_row.get("Email"),
+        "Phone":             appt_row.get("Phone"),
+        "Individual_Company": appt_row.get("Individual Company", None),
+        "Contact_Name":      matched,
+        "Stage":             "Document Verification pending from CSR",
+        "Procedure_Type":    selected_procedure,
+        **({"Selling_Price": float(price)} if price else {}),
+        "Lead_Source":       "Booking Form"
     }
 
     return {"data": [record]}
