@@ -1111,14 +1111,20 @@ if "results" in st.session_state and st.session_state.results:
 
         st.success("🎉 All attachments uploaded!")
         st.write(row)
-        try:
-            doc_id = appt_row["ID"]
-            db.collection("appointments").document(doc_id).update({
-                "status": "done"
-            })
-            st.success("✅ Appointment status set to Done in Firebase.")
-        except Exception as e:
-            st.error(f"⚠️ Failed to update appointment status: {e}")
+        docs = db.collection("appointments") \
+                 .where("bookingId", "==", booking_id) \
+                 .stream()
+
+        # 2) Update each matching document’s status
+        updated = 0
+        for doc in docs:
+            doc.reference.update({"status": "done"})
+            updated += 1
+
+        if updated:
+            st.success(f"✅ Appointment status set to Done in Firebase ({updated} document{'s' if updated>1 else ''}).")
+        else:
+            st.error("⚠️ No appointment found with that Booking ID to update.")
 
 if st.button("🔄 Work on another appointment"):
     # 1) Remove exactly the bits we want reset
