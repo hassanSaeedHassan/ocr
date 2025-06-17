@@ -522,6 +522,7 @@ def build_deal_payload(
     owner: Any,           # CSR name string or dict
     assigned_trustee: Dict[str, Any],
     appt_row: Dict[str, Any],  # {"First Name","Last Name","Email","Phone","Individual Company"}
+    pass_rm:Dict[str, Any],
     token: str
 ) -> Dict[str, Any]:
     auth_token = get_auth_token(token)
@@ -537,9 +538,15 @@ def build_deal_payload(
                 if name == u:
                     return {"module":"Users","id": csr.get("injaz_id") or csr.get("id"), "name": name}
         return {}
-
-    owner_block = _normalize_user(owner)
-    csr_block   = owner_block
+    if owner=="Hena Goyal":
+        csr_block={
+        "name": "Hena Goyal",
+        "id": "5818398000004410001"
+      }
+        owner_block=csr_block
+    else:
+        owner_block = _normalize_user(owner)
+        csr_block   = owner_block
 
     # 1) Build party details and contacts
     def _party_data(role_main, role_poa, party_label):
@@ -670,10 +677,7 @@ def build_deal_payload(
     record = {
         "Deal_Name":          (person_roles[0]["Name"] if person_roles else None),
         "Booking_Id":         booking_id,
-         "RM": {
-        "name": "Hena Goyal",
-        "id": "5818398000004410001"
-      },
+         "RM": pass_rm,
         "Appointment_Status": "Verification Pending",
         "Date":               iso_date,
         "Time":               time_slot,
@@ -693,5 +697,6 @@ def build_deal_payload(
         **({"Selling_Price":   price}            if price is not None else {}),
         "Lead_Source":         "Booking Form"
     }
-    st.write({"data": [record]})
+
+
     return {"data": [record]}
