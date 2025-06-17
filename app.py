@@ -34,15 +34,6 @@ from scripts.firebase_connectors.fire_base_connection import (
     load_appointments,
 )
 
-
-# ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
-if "client" not in st.session_state:
-    st.session_state.client = OpenAI(
-        base_url="https://router.huggingface.co/hyperbolic/v1",
-#         base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
-        api_key="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",)
-if "token" not in st.session_state:
-    st.session_state.token='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'
 st.set_page_config(
     page_title="Injaz OCR System",
     page_icon="https://bunny-wp-pullzone-x8psmhth4d.b-cdn.net/wp-content/uploads/2022/12/Asset-1.svg",
@@ -56,6 +47,17 @@ st.markdown("""
     .css-1v4dx5s {color: #000000 !important;}
   </style>
 """, unsafe_allow_html=True)
+
+
+# ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
+if "client" not in st.session_state:
+    st.session_state.client = OpenAI(
+        base_url="https://router.huggingface.co/hyperbolic/v1",
+#         base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
+        api_key="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",)
+if "token" not in st.session_state:
+    st.session_state.token='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'
+
 
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
 
@@ -194,7 +196,7 @@ if mode == "Appointment":
                 "Fatma Al Rahma","Hanaa Albalushi","Khozama Alhumyani",
                 "Manal Alnami","Mohammed Althawadi","Nadeen Ali","Ahmed Salah",
             ]
-            csr_names = ["Reda Najjar","Layal Makhlouf","Fatima Kanakri"]
+            csr_names = ["Reda Najjar","Layal Makhlouf","Fatima Kanakri","Hena Goyal","Reema Ibrahim","Windell Pajoyo"]
 
             # 1) Create editable view with Booking ID + the columns you want
             editable = subset[[
@@ -489,12 +491,12 @@ if st.button("Submit") and uploaded_files:
 
 
 if "results" in st.session_state and st.session_state.results:
-
     # — Group roles & validations under one section —
+#     st.write(appt_row)
     st.markdown("### Roles and validations")
     # 1) Roles accordion
     with st.expander("Roles and validations", expanded=True):
-        render_person_roles_editor(st.session_state.results)
+        render_person_roles_editor(st.session_state.results,appt_row.to_dict())
 
 
     # 2) Validation accordion (skipping IDs & Passports)
@@ -594,7 +596,7 @@ if "results" in st.session_state and st.session_state.results:
     }
     
     valid_csr_names = {
-        "Reda Najjar", "Layal Makhlouf",  "Fatima Kanakri"}
+        "Reda Najjar","Layal Makhlouf","Fatima Kanakri","Hena Goyal","Reema Ibrahim","Windell Pajoyo"}
     
     # ─── Fetch and store in session (only once) ──────────────────────────────────
     if "csr_list" not in st.session_state or "trustee_list" not in st.session_state:
@@ -617,11 +619,11 @@ if "results" in st.session_state and st.session_state.results:
 
     # ─── CSR picker ─────────────────────────────────────────────────────────
     if st.session_state.get("selected_csr"):
-        csr_name = st.session_state.selected_csr
-        st.markdown(f"**Assigned CSR Representative:** {csr_name}")
+        # Already assigned → show the name only
+        st.markdown(f"**Assigned CSR Representative:** {st.session_state.selected_csr}")
 
     else:
-        # …otherwise fall back to your selectbox UI
+        # Admin sees the dropdown
         selected_csr_name = st.selectbox(
             "Assign CSR Representative",
             ["–– None ––"] + csr_names,
@@ -632,15 +634,16 @@ if "results" in st.session_state and st.session_state.results:
                 u for u in st.session_state.csr_list
                 if (u.get("full_name") or u.get("name")) == selected_csr_name
             )
-            st.session_state.selected_csr = {
-                "id":        csr_obj["id"],
-                "email":     csr_obj.get("email"),
-                "full_name": csr_obj.get("full_name"),
-                "name":      csr_obj.get("name")
-            }
+            # Store only the full_name string for display
+            st.session_state.selected_csr       = csr_obj.get("full_name") or csr_obj.get("name")
+            # If you need the id/email later, stash them separately:
+            st.session_state.selected_csr_id    = csr_obj["id"]
+            st.session_state.selected_csr_email = csr_obj.get("email")
         else:
-            st.session_state.selected_csr = None
-    
+            st.session_state.selected_csr       = None
+            st.session_state.selected_csr_id    = None
+            st.session_state.selected_csr_email = None
+
     staff_name = row.get("staffName", "").strip()
     
     # Try to find an exact match (case-insensitive)
@@ -1110,7 +1113,6 @@ if "results" in st.session_state and st.session_state.results:
                     st.error(f"❌ `{file_name}` failed: {msg}")
 
         st.success("🎉 All attachments uploaded!")
-        st.write(row)
         docs = db.collection("appointments") \
                  .where("bookingId", "==", booking_id) \
                  .stream()
