@@ -52,76 +52,17 @@ def post_booking(auth_token: str, booking_payload: Dict) -> bool:
     if resp.status_code == 401:
         auth_token = get_auth_token(auth_token)
         resp = _call(auth_token)
-
     # 3) Raise for anything but 2xx
     try:
         resp.raise_for_status()
     except requests.exceptions.HTTPError as e:
         print(f"[Zoho POST /Deals] HTTP {resp.status_code}: {resp.text}")
         return False
-
+    
     # 4) Check body for success
     return bool(resp.json().get('data'))
 
-def create_contact_old(auth_token: str,
-                   first_name: str,
-                   last_name: str,
-                   email: str,
-                   phone: str,
-                   billing_phone: str,
-                   owner: dict,
-                   created_by: dict,
-                   lead_source: str = "Zoho Bookings"
-                  ) -> dict:
-    """
-    Creates a Contact in Zoho CRM and returns the API response JSON.
-    """
-    # make sure your ENDPOINTS dict includes:
-    ZOHO_API_BASE = "https://crm.zoho.com/crm/v2.2"
-    ENDPOINTS = {
-        # ... other modules ...
-        "contacts": f"{ZOHO_API_BASE}/Contacts",
-    }
-    url = ENDPOINTS["contacts"]
-    record = {
-        "First_Name":     first_name,
-        "Last_Name":      last_name,
-        "Full_Name":      f"{first_name} {last_name}",
-        "Email":          email,
-        "Phone":          phone,
-        "Billing_Phone":  billing_phone,
-        "Owner":          owner,
-        "Created_By":     created_by,
-        "Lead_Source":    lead_source
-    }
-    payload = {"data": [record]}
 
-    def _call(token: str):
-        return retry_on_exception(
-            lambda: requests.post(
-                url,
-                headers={
-                    "Authorization": f"Zoho-oauthtoken {token}",
-                    "Content-Type":  "application/json"
-                },
-                json=payload,
-                timeout=10
-            ),
-            retries=3
-        )
-
-    # 1) initial attempt
-    resp = _call(auth_token)
-
-    # 2) 401→refresh
-    if resp.status_code == 401:
-        auth_token = get_auth_token(auth_token)
-        resp = _call(auth_token)
-
-    # 3) raise on error
-    resp.raise_for_status()
-
-    return resp.json()
 # in scripts/integrators/integrator.py
 
 def create_contact(auth_token: str,
@@ -427,277 +368,330 @@ def next_booking_id(access_token: str) -> str:
 
 
 
-
-
-
-
-
 def build_deal_payload_old(
-    results: list,
-    person_roles: list,
-    selected_procedure: str,
-    appt_date: str,     # "12-05-2025"
-    time_slot: str,     # "08:15 AM"
-    booking_id: str,
-    owner,              # can be dict or plain CSR-name string
-    assigned_trustee: dict,
-    token: str
-) -> dict:
-    auth_token = get_auth_token(token)
-
-    def _normalize_user(u):
-        """
-        Accept either:
-          - a dict with .get("id")/.get("name")
-          - a legacy dict with .get("injaz_id")/.get("name")
-          - or just the CSR name string
-
-        Return a Zoho‐ready {"module":"Users","id":..., "name":...} or empty dict.
-        """
-        if isinstance(u, dict):
-            zoho_id = u.get("injaz_id") or u.get("id")
-            zoho_name = u.get("name") or u.get("full_name") or u.get("username")
-            if zoho_id and zoho_name:
-                return {"module":"Users","id":zoho_id,"name":zoho_name}
-        if isinstance(u, str):
-            for csr in st.session_state.csr_list:
-                candidate_name = csr.get("name") or csr.get("full_name")
-                if candidate_name == u:
-                    zoho_id = csr.get("injaz_id") or csr.get("id")
-                    return {"module":"Users","id":zoho_id,"name":candidate_name}
-        return {}
-
-    owner_block = _normalize_user(owner)
-    csr_block = owner_block
-
-    def _build_party(role_main, role_poa, prefix):
-        mains = [r for r in person_roles if r.get("Role") == role_main]
-        if not mains:
-            return []
-        poas = [r for r in person_roles if r.get("Role") == role_poa]
-        details = []
-        for m in mains:
-            names = m.get("Name", "").split()
-            first, last = (names[0], names[-1]) if names else ("", "")
-            entry = {
-                f"{prefix}_First_Name": first,
-                f"{prefix}_Last_Name": last,
-                f"{prefix}_POA_First_Name": "",
-                f"{prefix}_POA_Last_Name": "",
-                f"Is_{prefix.lower()}_Individual_Company": "Individual",
-            }
-            if poas:
-                pp = poas[0].get("Name", "").split()
-                entry[f"{prefix}_POA_First_Name"] = pp[0] if pp else ""
-                entry[f"{prefix}_POA_Last_Name"] = pp[-1] if pp else ""
-            details.append(entry)
-        return details
-
-    buyer_details = _build_party("buyer", "poa_buyer", "Buyer")
-    seller_details = _build_party("seller", "poa_seller", "Seller")
-
-    def _create_contacts(role, prefix):
-        contacts = []
-        for r in [x for x in person_roles if x.get("Role") == role]:
-            names = r.get("Name", "").split()
-            fn, ln = (names[0], names[-1]) if names else ("", "")
-            resp = create_contact(
-                auth_token, fn, ln,
-                email=r.get("Email", ""),
-                phone=r.get("Phone", ""),
-                billing_phone=r.get("Phone", ""),
-                owner=owner_block,
-                created_by=owner_block,
-                lead_source="Zoho Bookings"
-            )
-            details = resp.get("data", [{}])[0].get("details", {})
-            contact = {"module": "Contacts", "name": f"{fn} {ln}", "id": details.get("id")}
-            contacts.append(contact)
-        return contacts
-
-    buyer_contacts = _create_contacts("buyer", "Buyer")
-    seller_contacts = _create_contacts("seller", "Seller")
-
-    if buyer_details and buyer_contacts:
-        for i, entry in enumerate(buyer_details):
-            if i < len(buyer_contacts):
-                entry["Buyer_contact"] = buyer_contacts[i]
-    if seller_details and seller_contacts:
-        for i, entry in enumerate(seller_details):
-            if i < len(seller_contacts):
-                entry["Seller_Contact"] = seller_contacts[i]
-
-    # extract price
-    price = None
-    for d in results:
-        if "contract f" in d.get("doc_type", "").lower():
-            unified = unify_contract_f(d.get("extracted_data", {}))
-            price_str = unified.get("Property Financial Information", {}).get("Sell Price", "")
-            price = price_str.replace("AED", "").replace(",", "").strip()
-            break
-
-    # format date
-    dt = datetime.strptime(appt_date, "%d-%m-%Y")
-    iso_date = dt.strftime("%Y-%m-%d")
-
-    # build record
-    record = {
-        "Deal_Name": person_roles[0].get("Name") if person_roles else None,
-        "Booking_Id": booking_id,
-        "Appointment_Status": "Verification Pending",
-        "Date": iso_date,
-        "Time": time_slot,
-        **({"Buyer_Details1": buyer_details} if buyer_details else {}),
-        **({"Seller_Details1": seller_details} if seller_details else {}),
-        **({"Buyer_contact": buyer_contacts[0]} if buyer_contacts else {}),
-        **({"Seller_Contact": seller_contacts[0]} if seller_contacts else {}),
-        **({"Owner": owner_block} if owner_block else {}),
-        **({"Assigned_CSR": csr_block} if csr_block else {}),
-        **({"Assigned_trustee": assigned_trustee} if assigned_trustee else {}),
-        "Stage": "Document Verification pending from CSR",
-        "Individual_Company": "Individual",
-        "Procedure_Type": selected_procedure,
-        **({"Selling_Price": float(price)} if price else {}),
-        "Lead_Source": "Booking Form"
-    }
-
-    return {"data": [record]}
-
-
-
-
-def build_deal_payload(
     results: List[Dict[str, Any]],
     person_roles: List[Dict[str, Any]],
     selected_procedure: str,
-    appt_date: str,       # e.g. "12-05-2025"
-    time_slot: str,       # e.g. "08:15 AM"
+    appt_date: str,       # e.g. "17-06-2025"
+    time_slot: str,       # e.g. "03:45 PM"
     booking_id: str,
-    owner: Any,           # dict or CSR-name string
+    owner: Any,           # CSR name string or dict
     assigned_trustee: Dict[str, Any],
-    appt_row: Dict[str, Any],  # must contain "First Name", "Last Name", "Email", "Phone", "Individual Company"
+    appt_row: Dict[str, Any],  # {"First Name","Last Name","Email","Phone","Individual Company"}
     token: str
 ) -> Dict[str, Any]:
     auth_token = get_auth_token(token)
 
     def _normalize_user(u):
         if isinstance(u, dict):
-            zoho_id   = u.get("injaz_id") or u.get("id")
-            zoho_name = u.get("name")   or u.get("full_name")
-            if zoho_id and zoho_name:
-                return {"module":"Users","id":zoho_id,"name":zoho_name}
+            zoho_id = u.get("injaz_id") or u.get("id")
+            zoho_name = u.get("full_name") or u.get("name")
+            return {"module":"Users","id":zoho_id,"name":zoho_name} if zoho_id else {}
         if isinstance(u, str):
             for csr in st.session_state.csr_list:
-                cname = csr.get("name") or csr.get("full_name")
-                if cname == u:
-                    return {
-                        "module":"Users",
-                        "id": csr.get("injaz_id") or csr.get("id"),
-                        "name": cname
-                    }
+                name = csr.get("full_name") or csr.get("name")
+                if name == u:
+                    return {"module":"Users","id": csr.get("injaz_id") or csr.get("id"), "name": name}
         return {}
 
     owner_block = _normalize_user(owner)
     csr_block   = owner_block
 
-    def _build_party(role_main, role_poa, prefix):
-        mains = [r for r in person_roles if r.get("Role") == role_main]
-        poas  = [r for r in person_roles if r.get("Role") == role_poa]
-        out = []
-        for m in mains:
-            parts = m.get("Name", "").split()
-            first, last = (parts[0], parts[-1]) if parts else ("","")
-            entry = {
-                f"{prefix}_First_Name": first,
-                f"{prefix}_Last_Name": last,
-                f"{prefix}_POA_First_Name": "",
-                f"{prefix}_POA_Last_Name": "",
-                f"Is_{prefix.lower()}_Individual_Company": "Individual",
-            }
-            if poas:
-                pp = poas[0].get("Name","").split()
-                entry[f"{prefix}_POA_First_Name"] = pp[0] if pp else ""
-                entry[f"{prefix}_POA_Last_Name"]  = pp[-1] if pp else ""
-            out.append(entry)
-        return out
+    # 1) Build party details and contacts
+    def _party_data(role_main, role_poa, party_label):
+        mains = [r for r in person_roles if r["Role"] == role_main]
+        poas  = [r for r in person_roles if r["Role"] == role_poa]
 
-    def _create_contacts(role: str) -> List[Dict[str, Any]]:
+        # create contact records for each main
         contacts = []
-        for r in person_roles:
-            if r.get("Role") != role:
-                continue
-            parts = r.get("Name","").split()
-            fn, ln = (parts[0], parts[-1]) if parts else ("","")
+        for m in mains:
+            fn, ln = m["Name"].split()[0], m["Name"].split()[-1]
             resp = create_contact(
                 auth_token, fn, ln,
-                email=r.get("Email",""),
-                phone=r.get("Phone",""),
-                billing_phone=r.get("Phone",""),
+                email=m.get("Email",""),
+                phone=m.get("Phone",""),
+                billing_phone=m.get("Phone",""),
                 owner=owner_block,
                 created_by=owner_block,
                 lead_source="Zoho Bookings"
             )
-            det = resp.get("data", [{}])[0].get("details", {})
-            contacts.append({
-                "module": "Contacts",
-                "name":    f"{fn} {ln}",
-                "id":      det.get("id")
-            })
-        return contacts
+            det = resp.get("data",[{}])[0].get("details",{})
+            contacts.append({"id": det.get("id"), "name": f"{fn} {ln}"})
 
-    buyer_details   = _build_party("buyer",   "poa_buyer",   "Buyer")
-    seller_details  = _build_party("seller",  "poa_seller",  "Seller")
-    buyer_contacts  = _create_contacts("buyer")
-    seller_contacts = _create_contacts("seller")
+        # now build the list of detail‐dicts
+        details = []
+        for idx, m in enumerate(mains):
+            fn, ln = m["Name"].split()[0], m["Name"].split()[-1]
 
-    # flatten for matching
-    all_contacts = buyer_contacts + seller_contacts
+            # base entry
+            entry = {
+                f"{party_label}_First_Name": fn,
+                f"{party_label}_Last_Name": ln,
+                f"{party_label}_Email": m.get("Email",""),
+                f"{party_label}_Phone": m.get("Phone",""),
+                f"Is_{party_label.lower()}_Individual_Company": "Individual",
+            }
+            # POA fields
+            if party_label == "Buyer":
+                entry.update({
+                    "B_POA_First_Name": None,
+                    "B_POA_Last_Name":  None,
+                    "B_POA_Phone":      None,
+                })
+            else:
+                entry.update({
+                    "POA_First_Name": None,
+                    "POA_Last_Name":  None,
+                    "POA_Phone":      None,
+                    "POA_Email":      None,
+                })
 
-    # match by first OR last name
-    appt_first = appt_row.get("First Name","").strip()
-    appt_last  = appt_row.get("Last Name","").strip()
-    matched = None
-    for c in all_contacts:
-        parts = c["name"].split()
-        if appt_first in parts or appt_last in parts:
-            matched = c
-            break
-    if not matched and all_contacts:
-        matched = all_contacts[0]
+            # attach contact inside each detail
+            contact_key = "Buyer_contact" if party_label=="Buyer" else "Seller_Contact"
+            entry[contact_key] = contacts[idx] if idx < len(contacts) else {}
 
-    # extract price
+            details.append(entry)
+
+        return details, contacts
+
+    buyer_details, buyer_contacts   = _party_data("buyer",  "poa_buyer",  "Buyer")
+    seller_details, seller_contacts = _party_data("seller", "poa_seller", "Seller")
+
+    # 2) Extract selling price
     price = None
     for d in results:
         if "contract f" in d.get("doc_type","").lower():
-            u = unify_contract_f(d.get("extracted_data", {}))
-            price_str = u.get("Property Financial Information", {}).get("Sell Price","")
-            price = price_str.replace("AED","").replace(",","").strip()
+            u = unify_contract_f(d["extracted_data"])
+            sp = u.get("Property Financial Information",{}).get("Sell Price","")
+            if sp:
+                price = float(sp.replace("AED","").replace(",","").strip())
             break
 
+    # 3) Appointment date ISO
     iso_date = datetime.strptime(appt_date, "%d-%m-%Y").strftime("%Y-%m-%d")
 
-    record = {
-        "Deal_Name":        person_roles[0].get("Name") if person_roles else None,
-        "Booking_Id":       booking_id,
-        "Appointment_Status":"Verification Pending",
-        "Date":             iso_date,
-        "Time":             time_slot,
-        **({"Buyer_Details1":  buyer_details}  if buyer_details  else {}),
-        **({"Seller_Details1": seller_details} if seller_details else {}),
-        **({"Buyer_contact":  buyer_contacts[0]}  if buyer_contacts  else {}),
-        **({"Seller_Contact": seller_contacts[0]} if seller_contacts else {}),
-        **({"Owner":         owner_block} if owner_block else {}),
-        **({"Assigned_CSR":  csr_block}   if csr_block   else {}),
-        **({"Assigned_trustee": assigned_trustee} if assigned_trustee else {}),
-        # new appointment fields:
-        "Email":             appt_row.get("Email"),
-        "Phone":             appt_row.get("Phone"),
-        "Individual_Company": appt_row.get("Individual Company", None),
-        "Contact_Name":      matched,
-        "Stage":             "Document Verification pending from CSR",
-        "Procedure_Type":    selected_procedure,
-        **({"Selling_Price": float(price)} if price else {}),
-        "Lead_Source":       "Booking Form"
-    }
+    # 4) Find contact_name block (optional)
+    appt_full = f"{appt_row.get('First Name','').strip()} {appt_row.get('Last Name','').strip()}"
+    all_contacts = buyer_contacts + seller_contacts
+    matched = next((c for c in all_contacts if c["name"] == appt_full), None)
+    if not matched:
+        tokens = set(appt_full.lower().split())
+        matched = next((c for c in all_contacts if tokens & set(c["name"].lower().split())), None)
+    if not matched and all_contacts:
+        names = [c["name"] for c in all_contacts]
+        close = difflib.get_close_matches(appt_full, names, n=1, cutoff=0.6)
+        if close:
+            matched = next(c for c in all_contacts if c["name"] == close[0])
 
+    contact_block = matched or {}
+
+    # 5) Build record with exactly the conditional blocks you asked for
+    record = {
+        "Deal_Name":          (person_roles[0]["Name"] if person_roles else None),
+        "Booking_Id":         booking_id,
+        "Appointment_Status": "Verification Pending",
+        "Date":               iso_date,
+        "Time":               time_slot,
+        **({"Buyer_Details1":  buyer_details}   if buyer_details   else {}),
+        **({"Seller_Details1": seller_details}  if seller_details  else {}),
+        **({"Buyer_contact":   buyer_contacts[0]}  if buyer_contacts  else {}),
+        **({"Seller_Contact":  seller_contacts[0]} if seller_contacts else {}),
+        **({"Owner":           owner_block}      if owner_block      else {}),
+        **({"Assigned_CSR":    csr_block}        if csr_block        else {}),
+        **({"Assigned_trustee":assigned_trustee} if assigned_trustee else {}),
+        "Email":               appt_row.get("Email"),
+        "Phone":               appt_row.get("Phone"),
+        "Individual_Company":  appt_row.get("Individual Company"),
+        **({"Contact_Name":    contact_block}    if contact_block    else {}),
+        "Stage":               "Document Verification pending from CSR",
+        "Procedure_Type":      selected_procedure,
+        **({"Selling_Price":   price}            if price is not None else {}),
+        "Lead_Source":         "Booking Form"
+    }
+    st.write({"data": [record]})
+    return {"data": [record]}
+
+
+def build_deal_payload(
+    results: List[Dict[str, Any]],
+    person_roles: List[Dict[str, Any]],
+    selected_procedure: str,
+    appt_date: str,       # e.g. "17-06-2025"
+    time_slot: str,       # e.g. "03:45 PM"
+    booking_id: str,
+    owner: Any,           # CSR name string or dict
+    assigned_trustee: Dict[str, Any],
+    appt_row: Dict[str, Any],  # {"First Name","Last Name","Email","Phone","Individual Company"}
+    token: str
+) -> Dict[str, Any]:
+    auth_token = get_auth_token(token)
+
+    def _normalize_user(u):
+        if isinstance(u, dict):
+            zoho_id = u.get("injaz_id") or u.get("id")
+            zoho_name = u.get("full_name") or u.get("name")
+            return {"module":"Users","id":zoho_id,"name":zoho_name} if zoho_id else {}
+        if isinstance(u, str):
+            for csr in st.session_state.csr_list:
+                name = csr.get("full_name") or csr.get("name")
+                if name == u:
+                    return {"module":"Users","id": csr.get("injaz_id") or csr.get("id"), "name": name}
+        return {}
+
+    owner_block = _normalize_user(owner)
+    csr_block   = owner_block
+
+    # 1) Build party details and contacts
+    def _party_data(role_main, role_poa, party_label):
+        mains = [r for r in person_roles if r["Role"] == role_main]
+        poas  = [r for r in person_roles if r["Role"] == role_poa]
+
+        # create contact records for each main
+        contacts = []
+        for m in mains:
+            fn, ln = m["Name"].split()[0], m["Name"].split()[-1]
+            resp = create_contact(
+                auth_token, fn, ln,
+                email=m.get("Email",""),
+                phone=m.get("Phone",""),
+                billing_phone=m.get("Phone",""),
+                owner=owner_block,
+                created_by=owner_block,
+                lead_source="Zoho Bookings"
+            )
+            det = resp.get("data",[{}])[0].get("details",{})
+            contacts.append({"id": det.get("id"), "name": f"{fn} {ln}"})
+
+        # now build the list of detail‐dicts
+        details = []
+        for idx, m in enumerate(mains):
+            fn, ln = m["Name"].split()[0], m["Name"].split()[-1]
+
+            # base entry
+            entry = {
+                f"{party_label}_First_Name": fn,
+                f"{party_label}_Last_Name": ln,
+                f"{party_label}_Email": m.get("Email",""),
+                f"{party_label}_Phone": m.get("Phone",""),
+                f"Is_{party_label.lower()}_Individual_Company": "Individual",
+            }
+
+            # populate POA fields from the first matching POA entry, if any
+            if poas:
+                poa = poas[0]
+                pfn, pln = poa["Name"].split()[0], poa["Name"].split()[-1]
+                if party_label == "Buyer":
+                    entry.update({
+                        "B_POA_First_Name": pfn,
+                        "B_POA_Last_Name":  pln,
+                        "B_POA_Phone":      poa.get("Phone"),
+                        "Buyer_POA_Email":  poa.get("Email")
+                    })
+                else:
+                    entry.update({
+                        "POA_First_Name": poa["Name"].split()[0],
+                        "POA_Last_Name":  poa["Name"].split()[-1],
+                        "POA_Phone":      poa.get("Phone"),
+                        "POA_Email":      poa.get("Email")
+                    })
+            else:
+                # no POA → still include nulls
+                if party_label == "Buyer":
+                    entry.update({
+                        "B_POA_First_Name": None,
+                        "B_POA_Last_Name":  None,
+                        "B_POA_Phone":      None,
+                        "Buyer_POA_Email":  None
+                    })
+                else:
+                    entry.update({
+                        "POA_First_Name": None,
+                        "POA_Last_Name":  None,
+                        "POA_Phone":      None,
+                        "POA_Email":      None
+                    })
+
+            # attach contact inside each detail
+            contact_key = "Buyer_contact" if party_label=="Buyer" else "Seller_Contact"
+            entry[contact_key] = contacts[idx] if idx < len(contacts) else {}
+
+            details.append(entry)
+
+        return details, contacts
+
+
+    buyer_details, buyer_contacts   = _party_data("buyer",  "poa_buyer",  "Buyer")
+    seller_details, seller_contacts = _party_data("seller", "poa_seller", "Seller")
+
+    # 2) Extract selling price
+    price = None
+    for d in results:
+        if "contract f" in d.get("doc_type","").lower():
+            u = unify_contract_f(d["extracted_data"])
+            sp = u.get("Property Financial Information",{}).get("Sell Price","")
+            if sp:
+                price = float(sp.replace("AED","").replace(",","").strip())
+            break
+
+    # 3) Appointment date ISO
+    iso_date = datetime.strptime(appt_date, "%d-%m-%Y").strftime("%Y-%m-%d")
+
+    # 4) Find or create Contact_Name
+    appt_full = f"{appt_row.get('First Name','').strip()} {appt_row.get('Last Name','').strip()}"
+    all_contacts = buyer_contacts + seller_contacts
+
+    # try exact/token/fuzzy match
+    matched = next((c for c in all_contacts if c["name"] == appt_full), None)
+    if not matched:
+        tokens = set(appt_full.lower().split())
+        matched = next((c for c in all_contacts if tokens & set(c["name"].lower().split())), None)
+    if not matched and all_contacts:
+        names = [c["name"] for c in all_contacts]
+        close = difflib.get_close_matches(appt_full, names, n=1, cutoff=0.6)
+        if close:
+            matched = next(c for c in all_contacts if c["name"] == close[0])
+
+    # if still not matched, create a new contact
+    if not matched:
+        fn, ln = appt_row.get("First Name",""), appt_row.get("Last Name","")
+        resp = create_contact(
+            auth_token, fn, ln,
+            email=appt_row.get("Email",""),
+            phone=appt_row.get("Phone",""),
+            billing_phone=appt_row.get("Phone",""),
+            owner=owner_block,
+            created_by=owner_block,
+            lead_source="Zoho Bookings"
+        )
+        det = resp.get("data",[{}])[0].get("details",{})
+        matched = {"id": det.get("id"), "name": f"{fn} {ln}"}
+
+    # 5) Assemble record with conditional blocks
+    record = {
+        "Deal_Name":          (person_roles[0]["Name"] if person_roles else None),
+        "Booking_Id":         booking_id,
+         "RM": {
+        "name": "Hena Goyal",
+        "id": "5818398000004410001"
+      },
+        "Appointment_Status": "Verification Pending",
+        "Date":               iso_date,
+        "Time":               time_slot,
+        **({"Buyer_Details1":  buyer_details}   if buyer_details   else {}),
+        **({"Seller_Details1": seller_details}  if seller_details  else {}),
+        **({"Buyer_contact":   buyer_contacts[0]}  if buyer_contacts  else {}),
+        **({"Seller_Contact":  seller_contacts[0]} if seller_contacts else {}),
+        **({"Owner":           owner_block}      if owner_block      else {}),
+        **({"Assigned_CSR":    csr_block}        if csr_block        else {}),
+        **({"Assigned_trustee":assigned_trustee} if assigned_trustee else {}),
+        "Email":               appt_row.get("Email"),
+        "Phone":               appt_row.get("Phone"),
+        "Individual_Company":  appt_row.get("Individual Company"),
+        "Contact_Name":        matched,
+        "Stage":               "Document Verification pending from CSR",
+        "Procedure_Type":      selected_procedure,
+        **({"Selling_Price":   price}            if price is not None else {}),
+        "Lead_Source":         "Booking Form"
+    }
+    st.write({"data": [record]})
     return {"data": [record]}
