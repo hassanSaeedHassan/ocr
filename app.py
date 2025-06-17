@@ -495,8 +495,32 @@ if "results" in st.session_state and st.session_state.results:
 #     st.write(appt_row)
     st.markdown("### Roles and validations")
     # 1) Roles accordion
+#     with st.expander("Roles and validations", expanded=True):
+#         render_person_roles_editor(st.session_state.results,appt_row.to_dict())
     with st.expander("Roles and validations", expanded=True):
-        render_person_roles_editor(st.session_state.results,appt_row.to_dict())
+
+        # 1) Create a form so edits don’t instantly rerun the whole app:
+        with st.form("roles_form"):
+
+            # 2) Call your existing function _inside_ the form
+            #    It will render the data_editor and (internally)
+            #    set `st.session_state.person_roles` once you submit.
+            render_person_roles_editor(
+                results=st.session_state.results,
+                appt_row=appt_row.to_dict(),
+                key="person_roles_editor"
+            )
+
+            # 3) Add an explicit "Save roles" button
+            save = st.form_submit_button("💾 Save roles")
+
+            if save:
+                st.success("✅ Roles table saved. You can now continue.")
+
+        # 4) Until the user clicks "Save roles", we stop here:
+        if "person_roles" not in st.session_state:
+            st.info("Make your edits above, then click **Save roles** to unlock the rest of the form.")
+            st.stop()
 
 
     # 2) Validation accordion (skipping IDs & Passports)
@@ -615,7 +639,7 @@ if "results" in st.session_state and st.session_state.results:
     # ─── Prepare the display names ──────────────────────────────────────────────
     csr_names = [u.get("full_name") or u.get("name") for u in st.session_state.csr_list]
     trustee_names = [u.get("full_name") or u.get("name") for u in st.session_state.trustee_list]
-
+    csr_names.append("Hena Goyal")
 
     # ─── CSR picker ─────────────────────────────────────────────────────────
     if st.session_state.get("selected_csr"):
@@ -623,26 +647,34 @@ if "results" in st.session_state and st.session_state.results:
         st.markdown(f"**Assigned CSR Representative:** {st.session_state.selected_csr}")
 
     else:
-        # Admin sees the dropdown
+        options = ["–– None ––"] + csr_names
         selected_csr_name = st.selectbox(
             "Assign CSR Representative",
-            ["–– None ––"] + csr_names,
+            options,
             key="csr_selector"
         )
-        if selected_csr_name != "–– None ––":
+
+        if selected_csr_name == "–– None ––":
+            # Reset
+            st.session_state.selected_csr       = None
+            st.session_state.selected_csr_id    = None
+            st.session_state.selected_csr_email = None
+
+        elif selected_csr_name == "Hena Goyal":
+            # Special manual entry
+            st.session_state.selected_csr       = "Hena Goyal"
+            st.session_state.selected_csr_id    = 5818398000004410001
+            st.session_state.selected_csr_email = "hena@injazrt.ae"
+
+        else:
+            # Everyone else must come from csr_list
             csr_obj = next(
                 u for u in st.session_state.csr_list
                 if (u.get("full_name") or u.get("name")) == selected_csr_name
             )
-            # Store only the full_name string for display
             st.session_state.selected_csr       = csr_obj.get("full_name") or csr_obj.get("name")
-            # If you need the id/email later, stash them separately:
             st.session_state.selected_csr_id    = csr_obj["id"]
             st.session_state.selected_csr_email = csr_obj.get("email")
-        else:
-            st.session_state.selected_csr       = None
-            st.session_state.selected_csr_id    = None
-            st.session_state.selected_csr_email = None
 
     staff_name = row.get("staffName", "").strip()
     
@@ -695,7 +727,19 @@ if "results" in st.session_state and st.session_state.results:
             }
         else:
             st.session_state.selected_trustee = None
-
+    selected_rm = st.selectbox(
+            "Assign RM",
+            ["–– None ––"] + ["Hena Goyal"],
+            key="RM_selector"
+        )
+    pass_rm=None
+    if selected_rm=="Hena Goyal":
+        pass_rm={
+        "name": "Hena Goyal",
+        "id": "5818398000004410001"
+      }
+    else:
+        pass_rm={}
     st.markdown("### Document Review")
     options = []
     for i, doc in enumerate(st.session_state.results, start=1):
@@ -1005,18 +1049,35 @@ if "results" in st.session_state and st.session_state.results:
         }
 
         # 1b) build & post deal, passing the new appt_row
-        payload = build_deal_payload(
-            results=st.session_state.results,
-            person_roles=st.session_state.person_roles,
-            selected_procedure=selected_procedure,
-            appt_date=appt_date,
-            time_slot=time_slot,
-            booking_id=booking_id,
-            owner=st.session_state.selected_csr,
-            assigned_trustee=st.session_state.selected_trustee,
-            appt_row=appt_row,
-            token=st.session_state.get("zoho_token")
-        )
+        if st.session_state.selected_csr =="Hena Goyal":
+                payload = build_deal_payload(
+                results=st.session_state.results,
+                person_roles=st.session_state.person_roles,
+                selected_procedure=selected_procedure,
+                appt_date=appt_date,
+                time_slot=time_slot,
+                booking_id=booking_id,
+                owner="Hena Goyal",
+                assigned_trustee=st.session_state.selected_trustee,
+                appt_row=appt_row,
+                pass_rm=pass_rm,
+                token=st.session_state.get("zoho_token")
+            )
+            
+        else:
+            payload = build_deal_payload(
+                results=st.session_state.results,
+                person_roles=st.session_state.person_roles,
+                selected_procedure=selected_procedure,
+                appt_date=appt_date,
+                time_slot=time_slot,
+                booking_id=booking_id,
+                owner=st.session_state.selected_csr,
+                assigned_trustee=st.session_state.selected_trustee,
+                appt_row=appt_row,
+                pass_rm=pass_rm,
+                token=st.session_state.get("zoho_token")
+            )
         posted = post_booking(st.session_state.get("zoho_token"), payload)
         if not posted:
             st.error("❌ Failed to create Deal in Zoho. Check logs for details.")
