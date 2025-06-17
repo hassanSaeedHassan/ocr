@@ -47,6 +47,7 @@ st.markdown("""
     .css-1v4dx5s {color: #000000 !important;}
   </style>
 """, unsafe_allow_html=True)
+st.session_state.adminnn=None
 
 
 # ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
@@ -120,6 +121,8 @@ if st.session_state.get("logged_in"):
             "selected_trustee",
         ]:
             st.session_state.pop(k, None)
+        if st.session_state.adminnn==True:
+            st.session_state.pop('selected_csr', None)
         st.rerun()
 
 # initialize pagination & selection
@@ -189,8 +192,10 @@ if mode == "Appointment":
 #         ]])
 
         is_admin = st.session_state.get("selected_csr") is None
+    
         if is_admin:
             st.warning("⚡️ Admin mode: you can edit Staff Name, Assigned CSR, or delete appointments.")
+            st.session_state.adminnn=True
 
             trustee_names = [
                 "Fatma Al Rahma","Hanaa Albalushi","Khozama Alhumyani",
@@ -1199,6 +1204,9 @@ if st.button("🔄 Work on another appointment"):
         "selected_trustee",
     ]:
         st.session_state.pop(key, None)
+        
+    if st.session_state.adminnn==True:
+        st.session_state.pop('selected_csr', None)
 
     # 2) Reset pagination
     st.session_state.page = 1
