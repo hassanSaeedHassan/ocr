@@ -142,8 +142,8 @@ def unify_poa_data(raw_data) -> dict:
 # Initialize VLM client once
 _client = OpenAI(
     
-    # base_url="https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
-    base_url="https://router.huggingface.co/hyperbolic/v1",
+    base_url="https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
+    # base_url="https://router.huggingface.co/hyperbolic/v1",
     api_key="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"
 )
 
