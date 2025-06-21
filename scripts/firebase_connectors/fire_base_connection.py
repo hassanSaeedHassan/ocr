@@ -75,12 +75,19 @@ def load_appointments(db) -> pd.DataFrame:
         d["id"] = doc.id
 
         # Normalize assigned_to:
-        assigned = d.get("assigned_to", None)
+        assigned = d.get("csr", None)
         if isinstance(assigned, dict):
             # prefer full_name, else name, else leave None
-            d["assigned_to"] = assigned.get("full_name") or assigned.get("name")
+            d["csr"] = assigned.get("full_name") or assigned.get("name")
         else:
-            d["assigned_to"] = assigned
+            d["csr"] = assigned
+            
+        rm_assigned = d.get("rm", None)
+        if isinstance(rm_assigned, dict):
+            # prefer full_name, else name, else leave None
+            d["rm"] = rm_assigned.get("full_name") or rm_assigned.get("name")
+        else:
+            d["rm"] = rm_assigned
 
         # convert Firestore Timestamp -> Python datetime
         ts = d.get("createdAt")
@@ -95,7 +102,7 @@ def load_appointments(db) -> pd.DataFrame:
 
     # CSR-mode filter
     if csr_name:
-        df = df[df["assigned_to"].isna() | (df["assigned_to"] == csr_name)]
+        df = df[df["csr"].isna() | (df["csr"] == csr_name)]
 
     # Drop failed bookings
     if "bookingStatus" in df.columns:
@@ -125,7 +132,9 @@ def load_appointments(db) -> pd.DataFrame:
         "contractPassword":  "Contract Password",
         "timeSlot":          "Time Slot",
         "countryCode":       "Country Code",
-        "bookingStatus":     "Booking Status"
+        "bookingStatus":     "Booking Status",
+        "csr":"Assigned CSR2" ,
+        "rm":"RM"
     })
 
     # Reset index to 1-based
