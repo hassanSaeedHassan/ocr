@@ -202,31 +202,38 @@ if mode == "Appointment":
                 "Manal Alnami","Mohammed Althawadi","Nadeen Ali","Ahmed Salah",
             ]
             csr_names = ["Reda Najjar","Layal Makhlouf","Fatima Kanakri","Hena Goyal","Reema Ibrahim","Windell Pajoyo"]
-
+            rm_names=["Hena Goyal"]
             # 1) Create editable view with Booking ID + the columns you want
             editable = subset[[
                 "Booking ID",
                 "First Name","Last Name","Client Type",
                 "Appointment Type","Appointment Date","Time Slot",
-                "staffName","assigned_to"
+                "staffName","Assigned CSR2","RM"
             ]].copy()
 
             # 2) Store the Firestore doc ID as the DataFrame index
             editable.index = subset["ID"]
 
             # 3) Fill defaults and add the Delete checkbox
-            editable["assigned_to"] = editable["assigned_to"].fillna("")
+#             editable["assigned_to"] = editable["assigned_to"].fillna("")
+            editable["Assigned CSR2"] = editable["Assigned CSR2"].fillna("")
             editable["staffName"]    = editable["staffName"].fillna("")
+            editable["RM"]    = editable["RM"].fillna("")
             editable["Delete"]       = False
 
             # 4) Render the editor, hiding the index (so users never see the doc ID)
             edited = st.data_editor(
                 editable,
                 column_config={
-                    "assigned_to": st.column_config.SelectboxColumn(
+                    "RM": st.column_config.SelectboxColumn(
+                        "Assigned RM",
+                        options=[""] + rm_names,
+                        help="Pick a RM (blank = unassigned)"
+                    ),
+                        "Assigned CSR2": st.column_config.SelectboxColumn(
                         "Assigned CSR",
                         options=[""] + csr_names,
-                        help="Pick a CSR (blank = unassigned)"
+                        help="Pick a trustee (blank = unassigned)"
                     ),
                     "staffName": st.column_config.SelectboxColumn(
                         "Staff Name",
@@ -240,7 +247,7 @@ if mode == "Appointment":
                 },
                 disabled=[
                     col for col in editable.columns
-                    if col not in ("staffName", "assigned_to", "Delete")
+                    if col not in ("staffName","Assigned CSR2","RM", "Delete")
                 ],
                 hide_index=True,            # <- hides the Firestore ID index
                 use_container_width=True
@@ -251,7 +258,7 @@ if mode == "Appointment":
                 for doc_id, row in edited.iterrows():
                     db.collection("appointments").document(doc_id).update({
                         "staffName":   row["staffName"],
-                        "assigned_to": row["assigned_to"] or None
+                        "csr": row["csr"] or None
                     })
                 st.success("🔄 Assignments saved to Firebase.")
                 st.rerun()
@@ -640,17 +647,38 @@ if "results" in st.session_state and st.session_state.results:
             u for u in csr_users
             if (u.get("full_name") or u.get("name")) in valid_csr_names
         ]
-    
+        st.session_state.csr_list.append({
+             "full_name" : "Hena Goyal",
+        "id "   :"5818398000004410001",
+        "email":"hena@injazrt.ae"})
     # ─── Prepare the display names ──────────────────────────────────────────────
     csr_names = [u.get("full_name") or u.get("name") for u in st.session_state.csr_list]
     trustee_names = [u.get("full_name") or u.get("name") for u in st.session_state.trustee_list]
-    csr_names.append("Hena Goyal")
+#     csr_names.append("Hena Goyal")
 
     # ─── CSR picker ─────────────────────────────────────────────────────────
-    if st.session_state.get("selected_csr"):
+    if st.session_state.get("selected_csr") :
         # Already assigned → show the name only
         st.markdown(f"**Assigned CSR Representative:** {st.session_state.selected_csr}")
+        csr_obj = next(
+                u for u in st.session_state.csr_list
+                if (u.get("full_name") or u.get("name")) == st.session_state.selected_csr
+            )
+        st.session_state.selected_csr       = csr_obj.get("full_name") or csr_obj.get("name")
+        st.session_state.selected_csr_id    = csr_obj["id"]
+        st.session_state.selected_csr_email = csr_obj.get("email")
 
+
+    elif appt_row.get("Assigned CSR2"):
+        st.session_state.selected_csr=appt_row.get("Assigned CSR2")
+        st.markdown(f"**Assigned CSR Representative:** {st.session_state.selected_csr}")
+        csr_obj = next(
+                u for u in st.session_state.csr_list
+                if (u.get("full_name") or u.get("name")) == st.session_state.selected_csr
+            )
+        st.session_state.selected_csr       = csr_obj.get("full_name") or csr_obj.get("name")
+        st.session_state.selected_csr_id    = csr_obj["id"]
+        st.session_state.selected_csr_email = csr_obj.get("email")
     else:
         options = ["–– None ––"] + csr_names
         selected_csr_name = st.selectbox(
@@ -732,19 +760,26 @@ if "results" in st.session_state and st.session_state.results:
             }
         else:
             st.session_state.selected_trustee = None
-    selected_rm = st.selectbox(
-            "Assign RM",
-            ["–– None ––"] + ["Hena Goyal"],
-            key="RM_selector"
-        )
-    pass_rm=None
-    if selected_rm=="Hena Goyal":
+    if appt_row["RM"] !="":
+        st.write("Assigned RM",appt_row["RM"])
         pass_rm={
-        "name": "Hena Goyal",
-        "id": "5818398000004410001"
-      }
+            "name": "Hena Goyal",
+            "id": "5818398000004410001"
+          }
     else:
-        pass_rm={}
+        selected_rm = st.selectbox(
+                "Assign RM",
+                ["–– None ––"] + ["Hena Goyal"],
+                key="RM_selector"
+            )
+        pass_rm=None
+        if selected_rm=="Hena Goyal":
+            pass_rm={
+            "name": "Hena Goyal",
+            "id": "5818398000004410001"
+          }
+        else:
+            pass_rm={}
     st.markdown("### Document Review")
     options = []
     for i, doc in enumerate(st.session_state.results, start=1):
