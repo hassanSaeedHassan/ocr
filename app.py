@@ -49,15 +49,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.session_state.adminnn=None
 
+fb_raw   = st.secrets["huggingface"]
+fb_creds = fb_raw.to_dict()                           
+
 
 # ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
 if "client" not in st.session_state:
     st.session_state.client = OpenAI(
         base_url="https://router.huggingface.co/hyperbolic/v1",
         # base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
-        api_key="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",)
+        api_key=fb_creds["token"],)
 if "token" not in st.session_state:
-    st.session_state.token='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'
+    st.session_state.token=fb_creds["token"]
 
 
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
