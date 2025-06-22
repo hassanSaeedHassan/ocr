@@ -138,13 +138,14 @@ def unify_poa_data(raw_data) -> dict:
 
 
 
-
+fb_raw   = st.secrets["huggingface"]
+fb_creds = fb_raw.to_dict()  
 # Initialize VLM client once
 _client = OpenAI(
     
     # base_url="https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
     base_url="https://router.huggingface.co/hyperbolic/v1",
-    api_key="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"
+    api_key=fb_creds["token"]
 )
 
 
