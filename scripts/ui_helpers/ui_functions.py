@@ -80,6 +80,7 @@ def _find_contact_info_old(name: str, contact_map: dict, cutoff: float = 0.6):
     return {}
 
 
+# Helper: fuzzy‐and‐token match into contact_map
 def _find_contact_info(name: str, contact_map: dict, cutoff: float = 0.6):
     # guard against name=None or empty contact_map
     if not name or not contact_map:
@@ -93,6 +94,7 @@ def _find_contact_info(name: str, contact_map: dict, cutoff: float = 0.6):
             return info
     matches = difflib.get_close_matches(name, contact_map.keys(), n=1, cutoff=cutoff)
     return contact_map[matches[0]] if matches else {}
+
 
 
 def render_person_roles_editor_old(results, appt_row=None, key='person_roles_editor'):
@@ -483,11 +485,15 @@ def render_person_roles_editor(results, appt_row=None, key='person_roles_editor'
             cl['role'] = infer_role(cl['label'], sellers, buyers)
 
     # 8) Build contact_map from appointment row
+
     contact_map = {}
     if appt_row:
-        # guard against sellers=None or buyers=None
-        sellers_list = appt_row.get('sellers') or []
-        buyers_list  = appt_row.get('buyers')  or []
+        # normalize sellers/buyers into real lists
+        raw_sellers = appt_row.get('sellers')
+        raw_buyers  = appt_row.get('buyers')
+        sellers_list = raw_sellers if isinstance(raw_sellers, list) else []
+        buyers_list  = raw_buyers  if isinstance(raw_buyers, list)  else []
+
         for p in sellers_list + buyers_list:
             nm = p.get('fullName') or p.get('firstName')
             if nm:
