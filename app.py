@@ -53,8 +53,8 @@ st.session_state.adminnn=None
 # ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
 if "client" not in st.session_state:
     st.session_state.client = OpenAI(
-        # base_url="https://router.huggingface.co/hyperbolic/v1",
-        base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
+        base_url="https://router.huggingface.co/hyperbolic/v1",
+        # base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
         api_key="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",)
 if "token" not in st.session_state:
     st.session_state.token='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'
