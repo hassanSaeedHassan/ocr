@@ -55,9 +55,9 @@ if "client" not in st.session_state:
     st.session_state.client = OpenAI(
         base_url="https://router.huggingface.co/hyperbolic/v1",
         # base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
-        api_key="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",)
+        api_key="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",)
 if "token" not in st.session_state:
-    st.session_state.token='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'
+    st.session_state.token='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'
 
 
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
