@@ -56,11 +56,9 @@ if "client" not in st.session_state:
     st.session_state.client = OpenAI(
         base_url="https://router.huggingface.co/hyperbolic/v1",
 #         base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
-        api_key=fb_creds["token"]
-        
-    )
+        api_key=fb_creds['token'],)
 if "token" not in st.session_state:
-        st.session_state.token=fb_creds["token"]
+    st.session_state.token=fb_creds['token']
 
 
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
@@ -280,8 +278,9 @@ if mode == "Appointment":
             if st.button("💾 Save admin edits"):
                 for doc_id, row in edited.iterrows():
                     db.collection("appointments").document(doc_id).update({
-                        "staffName":   row["staffName"],
-                        "csr": row["csr"] or None
+                        "staffName": row["staffName"] or None,
+                        "csr":       row["Assigned CSR2"] or None,
+                        "rm":        row["RM"] or None,
                     })
                 st.success("🔄 Assignments saved to Firebase.")
                 st.rerun()
@@ -301,7 +300,7 @@ if mode == "Appointment":
                 subset[['Booking ID',
                     'First Name','Last Name','Client Type',
                     'Appointment Type','Appointment Date',
-                    'Time Slot','Email','Phone','Status','assigned_to'
+                    'Time Slot','Email','Phone','Status',"Assigned CSR2","RM"
                 ]],
                 use_container_width=True
             )
@@ -320,7 +319,7 @@ if mode == "Appointment":
         if st.button("Choose Appointment"):
             # load the row the user clicked on
             appt_doc = subset.iloc[names.index(sel)]
-            assigned_to = appt_doc.get("assigned_to")  # this is the CSR name or None
+            assigned_to = appt_doc.get("Assigned CSR2")  # this is the CSR name or None
 
             # who am I?
             csr_name = st.session_state.get("selected_csr") # None for admin
@@ -339,7 +338,7 @@ if mode == "Appointment":
             if not assigned_to:
                 db.collection("appointments") \
                   .document(appt_doc["ID"]) \
-                  .update({"assigned_to": csr_name})
+                  .update({"csr": csr_name})
 
             st.rerun()
 
@@ -683,13 +682,19 @@ if "results" in st.session_state and st.session_state.results:
     if st.session_state.get("selected_csr") :
         # Already assigned → show the name only
         st.markdown(f"**Assigned CSR Representative:** {st.session_state.selected_csr}")
-        csr_obj = next(
-                u for u in st.session_state.csr_list
-                if (u.get("full_name") or u.get("name")) == st.session_state.selected_csr
-            )
-        st.session_state.selected_csr       = csr_obj.get("full_name") or csr_obj.get("name")
-        st.session_state.selected_csr_id    = csr_obj["id"]
-        st.session_state.selected_csr_email = csr_obj.get("email")
+        
+        if st.session_state.selected_csr=="Hena Goyal":
+            st.session_state.selected_csr       = "Hena Goyal"
+            st.session_state.selected_csr_id    = 5818398000004410001
+            st.session_state.selected_csr_email = "hena@injazrt.ae"
+        else:
+            csr_obj = next(
+                    u for u in st.session_state.csr_list
+                    if (u.get("full_name") or u.get("name")) == st.session_state.selected_csr
+                )
+            st.session_state.selected_csr       = csr_obj.get("full_name") or csr_obj.get("name")
+            st.session_state.selected_csr_id    = csr_obj["id"]
+            st.session_state.selected_csr_email = csr_obj.get("email")
 
 
     elif appt_row.get("Assigned CSR2"):
@@ -1042,17 +1047,29 @@ if "results" in st.session_state and st.session_state.results:
         for i, r in enumerate(st.session_state.person_roles)
         if not r.get("Email") or not r.get("Phone")
     ]
-    if missing:
+
+    # 1) Do we have any empty Email/Phone?
+    has_missing_contacts = len(missing) > 0
+
+    # 2) Did they pick a real procedure?
+    picked_procedure = (selected_procedure != "–– Not selected yet ––")
+
+    # 3) Is there a CSR assigned?
+    has_csr = bool(st.session_state.get("selected_csr"))
+
+    # Show errors or hints:
+    if has_missing_contacts:
         lines = "\n".join(f"- Row {idx}: {name}" for idx, name in missing)
-        st.error(
-            "⚠️ Please fill in **both** Email and Phone for every person before you can submit:\n"
-            f"{lines}"
-        )
-        # stop here until user corrects
-        st.stop()
-    if selected_procedure == "–– Not selected yet ––":
+        st.error("⚠️ Please fill in **both** Email and Phone for every person before you can submit:\n" + lines)
+
+    if not picked_procedure:
         st.error("⚠️ Please choose a procedure before submitting to Zoho.")
-        st.stop()
+
+    if not has_csr:
+        st.error("⚠️ Please assign a CSR Representative before submitting to Zoho.")
+
+    # Now render the button, disabled unless _all_ three are satisfied:
+    ready_to_submit = (not has_missing_contacts) and picked_procedure and has_csr
     rename_rows = []
     for idx, doc in enumerate(st.session_state.results, start=1):
         dt = doc.get("doc_type", "document").lower().strip()
@@ -1106,7 +1123,7 @@ if "results" in st.session_state and st.session_state.results:
     submitted = st.session_state.get("submitted_to_zoho", False)
 
     # the button will be greyed out once submitted == True
-    if st.button("Submit to Zoho", disabled=submitted):
+    if st.button("Submit to Zoho", disabled=not ready_to_submit):
         # 1a) pull appointment info from the selected row
         try:
 
