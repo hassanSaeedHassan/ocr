@@ -47,20 +47,20 @@ st.markdown("""
     .css-1v4dx5s {color: #000000 !important;}
   </style>
 """, unsafe_allow_html=True)
-st.session_state.adminnn=None
 
 fb_raw   = st.secrets["huggingface"]
-fb_creds = fb_raw.to_dict()                           
-
+fb_creds = fb_raw.to_dict() 
 
 # ----------------- SET AUTHENTICATION & CLIENT IN SESSION ------------------
 if "client" not in st.session_state:
     st.session_state.client = OpenAI(
         base_url="https://router.huggingface.co/hyperbolic/v1",
-        # base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
-        api_key=fb_creds["token"],)
+#         base_url = "https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
+        api_key=fb_creds["token"]
+        
+    )
 if "token" not in st.session_state:
-    st.session_state.token=fb_creds["token"]
+        st.session_state.token=fb_creds["token"]
 
 
 THRESHOLD_BYTES = int(1.3 * 1024 * 1024)
@@ -78,7 +78,7 @@ if not st.session_state.logged_in:
         if user:
             st.session_state.logged_in = True
             st.session_state.user      = user
-
+            st.session_state.setdefault("adminnn", False)
             # load your list of CSRs
             rows = []
             for doc in db.collection("auth").stream():
@@ -111,22 +111,48 @@ if "zoho_token" not in st.session_state:
     except Exception as e:
         st.error(f"Could not get Zoho token: {e}")
         st.stop()
-        
+    
+CLEAR_CORE = [
+    "page",
+    "selected_name",
+    "selected_pdfs",
+    "results",
+    "current_index",
+    "selected_trustee",
+    "submitted_to_zoho",
+    "appt_row"
+]
+
+CSR_KEYS = [
+    "selected_csr",
+    "selected_csr_id",
+    "selected_csr_email",
+    "csr_selector",
+]
+
+RM_KEYS = [
+    "pass_rm",
+    "selected_rm",
+    "RM_selector",
+]    
+    
 if st.session_state.get("logged_in"):
     if st.button("🏠 Home"):
-        # clear all appointment‐flow state but stay logged in
-        for k in [
-            "page",
-            "selected_name",
-            "selected_pdfs",
-            "results",
-            "current_index",
-            "selected_trustee",
-        ]:
+        # 1) Always clear the core appointment state
+        for k in CLEAR_CORE:
             st.session_state.pop(k, None)
-        if st.session_state.adminnn==True:
-            st.session_state.pop('selected_csr', None)
+
+        # 2) If this is *admin* mode, clear the CSR & RM bits too.
+        #    If it’s a CSR user, leave them intact.
+        if st.session_state.get("adminnn"):
+            for k in CSR_KEYS + RM_KEYS:
+                st.session_state.pop(k, None)
+
+        # 3) Reset pagination and rerun
+        st.session_state.page = 1
+        st.session_state.selected_name=None
         st.rerun()
+
 
 # initialize pagination & selection
 st.session_state.setdefault("page", 1)
@@ -187,13 +213,7 @@ if mode == "Appointment":
         pages   = math.ceil(len(df) / per_page)
         pg      = st.session_state.page
         subset  = df.iloc[(pg-1)*per_page : pg*per_page]
-
-#         st.dataframe(subset[[
-#             'First Name','Last Name','Client Type',
-#             'Appointment Type','Appointment Date',
-#             'Time Slot','Email','Phone','Status','assigned_to','staffName'
-#         ]])
-
+        
         is_admin = st.session_state.get("selected_csr") is None
     
         if is_admin:
@@ -763,7 +783,7 @@ if "results" in st.session_state and st.session_state.results:
             }
         else:
             st.session_state.selected_trustee = None
-    if appt_row["RM"] !="":
+    if appt_row.get("RM"):
         st.write("Assigned RM",appt_row["RM"])
         pass_rm={
             "name": "Hena Goyal",
@@ -1015,6 +1035,8 @@ final_roles = st.session_state.get("person_roles", [])
 
 
 if "results" in st.session_state and st.session_state.results:
+    st.markdown("### Ready to send to Zoho CRM")
+    # ── 0) Let user rename each document before upload, using VLM‐generated labels ──
     missing = [
         (i+1, r["Name"])
         for i, r in enumerate(st.session_state.person_roles)
@@ -1028,8 +1050,9 @@ if "results" in st.session_state and st.session_state.results:
         )
         # stop here until user corrects
         st.stop()
-    st.markdown("### Ready to send to Zoho CRM")
-    # ── 0) Let user rename each document before upload, using VLM‐generated labels ──
+    if selected_procedure == "–– Not selected yet ––":
+        st.error("⚠️ Please choose a procedure before submitting to Zoho.")
+        st.stop()
     rename_rows = []
     for idx, doc in enumerate(st.session_state.results, start=1):
         dt = doc.get("doc_type", "document").lower().strip()
@@ -1247,23 +1270,17 @@ if "results" in st.session_state and st.session_state.results:
 
 if st.button("🔄 Work on another appointment"):
     # 1) Remove exactly the bits we want reset
-    for key in [
-        "selected_name",
-        "selected_pdfs",
-        "results",
-        "current_index",
-        "selected_trustee",
-    ]:
-        st.session_state.pop(key, None)
-        
-    if st.session_state.adminnn==True:
-        st.session_state.pop('selected_csr', None)
+    # 1) Always clear the core appointment state
+    for k in CLEAR_CORE:
+        st.session_state.pop(k, None)
 
-    # 2) Reset pagination
+    # 2) If this is *admin* mode, clear the CSR & RM bits too.
+    #    If it’s a CSR user, leave them intact.
+    if st.session_state.get("adminnn"):
+        for k in CSR_KEYS + RM_KEYS:
+            st.session_state.pop(k, None)
+
+    # 3) Reset pagination and rerun
     st.session_state.page = 1
-
-    # 3) Rerun from the top (now selected_name is gone)
-    try:
-        st.experimental_rerun()
-    except AttributeError:
-        st.rerun()
+    st.session_state.selected_name
+    st.rerun()
