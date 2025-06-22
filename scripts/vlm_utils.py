@@ -146,9 +146,9 @@ def process_multipage_document_old(file_data, extraction_prompt, max_page=6):
         ]
         with st.spinner(f"Extracting data from page {page_num+1}/{max_page}…"):
             client = OpenAI(
-                # base_url="https://router.huggingface.co/hyperbolic/v1",
-                base_url="https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
-                api_key="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"
+                base_url="https://router.huggingface.co/hyperbolic/v1",
+                # base_url="https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
+                api_key="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"
             )
             raw_output, _ = call_vlm(messages, client)
 
@@ -185,9 +185,9 @@ def process_multipage_document(file_data, extraction_prompt, max_page=6):
 
         with st.spinner(f"Extracting data from page {page_num+1}/{max_page}…"):
             client = OpenAI(
-                # base_url="https://router.huggingface.co/hyperbolic/v1",
-                base_url="https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
-                api_key="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"
+                base_url="https://router.huggingface.co/hyperbolic/v1",
+                # base_url="https://mf32siy1syuf3src.us-east-1.aws.endpoints.huggingface.cloud/v1/",
+                api_key="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"
             )
             try:
                 # First attempt
