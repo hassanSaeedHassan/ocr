@@ -1015,6 +1015,19 @@ final_roles = st.session_state.get("person_roles", [])
 
 
 if "results" in st.session_state and st.session_state.results:
+    missing = [
+        (i+1, r["Name"])
+        for i, r in enumerate(st.session_state.person_roles)
+        if not r.get("Email") or not r.get("Phone")
+    ]
+    if missing:
+        lines = "\n".join(f"- Row {idx}: {name}" for idx, name in missing)
+        st.error(
+            "⚠️ Please fill in **both** Email and Phone for every person before you can submit:\n"
+            f"{lines}"
+        )
+        # stop here until user corrects
+        st.stop()
     st.markdown("### Ready to send to Zoho CRM")
     # ── 0) Let user rename each document before upload, using VLM‐generated labels ──
     rename_rows = []
